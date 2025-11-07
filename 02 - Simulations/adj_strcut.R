@@ -166,10 +166,10 @@ df$time <- factor(df$time, labels = c("Stars", "Bands", "Smallworld"))
 # Creiamo il grafico
 p <- ggplot(df, aes(x = from, y = to, fill = factor(value))) +
   geom_tile(color = "grey80") +
-  scale_fill_manual(values = c("0" = "white", "1" = "steelblue")) +
+  scale_fill_manual(values = c("0" = "white", "1" = "gray40")) +
   coord_fixed() +
   facet_wrap(~ time, ncol = 3) +
-  labs(title = "Adjacency structures",
+  labs(title = "",
        x = "",
        y = "",
        fill = "") +
