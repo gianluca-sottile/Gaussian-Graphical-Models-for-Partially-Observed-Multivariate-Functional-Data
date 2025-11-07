@@ -21,7 +21,10 @@ Before running the code, ensure that your R environment is properly configured t
 The repository is organized into the following directories:
 
 ### **1. Code/**
-Contains the main source code for the proposed methodology, **pofggm.R** and **pofggm.cpp**.
+Contains the main source code for the proposed methodology: 
+
+- **`pofggm.R`**
+- **`pofggm.cpp`**.
 
 ---
 
