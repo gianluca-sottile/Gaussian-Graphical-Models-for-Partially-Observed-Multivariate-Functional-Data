@@ -22,7 +22,7 @@ GitHub/
 │   ├── pofggm.R
 │   └── pofggm.cpp
 │
-├── 02-Simulations/
+├── 02 - Simulations/
 │   ├── adj_struct.R
 │   ├── results.R
 │   ├── scripts/
@@ -38,7 +38,7 @@ GitHub/
 │       ├── figures/
 │       └── tables/
 │
-└── 03-Application/
+└── 03 - Application/
     ├── esg.R
     ├── data/
     │   ├── raw/
