@@ -1,4 +1,5 @@
 #include <RcppArmadillo.h>
+#include <cmath>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -201,6 +202,22 @@ arma::mat compute_Ginv(const arma::vec& lambda, double alpha, const arma::mat& Q
 }
 
 // [[Rcpp::export]]
+arma::mat compute_A_fast(const arma::vec& lambda,
+                         double alpha,
+                         const arma::mat& Q,
+                         const arma::mat& QtGom) {
+  
+  const double a = std::max(alpha, 1e-12);
+  arma::vec inv_diag = 1.0 / (lambda + a);
+  
+  // Equivalent to diag(inv_diag) * QtGom
+  arma::mat weighted = QtGom.each_col() % inv_diag;
+  
+  // A = Q * diag(inv_diag) * Q^T * Gom = Q * weighted
+  return Q * weighted;
+}
+
+// [[Rcpp::export]]
 double gcv_fun(double alpha,
                const vec& lambda,
                const mat& Q,
@@ -217,6 +234,36 @@ double gcv_fun(double alpha,
   double rss = accu(square(diff));
   double penalty = 1.0 - (df / n_obs);
   if (std::abs(penalty) < 1e-8) penalty = (penalty >= 0 ? 1e-8 : -1e-8);
+  return rss / (penalty * penalty);
+}
+
+// [[Rcpp::export]]
+double gcv_fun_fast(double alpha,
+                    const arma::vec& lambda,
+                    const arma::mat& QtGom,
+                    const arma::mat& ZidOiQ,
+                    const arma::mat& ZidMi,
+                    const int n_obs) {
+  
+  const double a = std::max(alpha, 1e-12);
+  
+  // df(alpha) = sum_j lambda_j / (lambda_j + alpha)
+  const double df = arma::accu(lambda / (lambda + a));
+  
+  // ZidMi_hat = ZidOi * Q * diag(1 / (lambda + alpha)) * Q^T * Gom
+  //           = ZidOiQ * [diag(1 / (lambda + alpha)) * QtGom]
+  arma::vec inv_diag = 1.0 / (lambda + a);
+  arma::mat weighted = QtGom.each_col() % inv_diag;
+  arma::mat XhatMiss = ZidOiQ * weighted;
+  
+  arma::mat diff = ZidMi - XhatMiss;
+  const double rss = arma::accu(arma::square(diff));
+  
+  double penalty = 1.0 - (df / n_obs);
+  if (std::abs(penalty) < 1e-8) {
+    penalty = (penalty >= 0.0 ? 1e-8 : -1e-8);
+  }
+  
   return rss / (penalty * penalty);
 }
 
@@ -296,6 +343,92 @@ double Brent_fmin(double ax, double bx, double tol,
   return x;
 }
 
+// ============================================================
+// Fast Brent minimizer
+// ============================================================
+
+// [[Rcpp::export]]
+double Brent_fmin_fast(double ax, double bx, double tol,
+                       const arma::vec& lambda,
+                       const arma::mat& QtGom,
+                       const arma::mat& ZidOiQ,
+                       const arma::mat& ZidMi,
+                       int n_obs) {
+  
+  const int ITMAX = 100;
+  const double CGOLD = 0.3819660;
+  const double ZEPS = 1e-10;
+  
+  double a = std::min(ax, bx);
+  double b = std::max(ax, bx);
+  double x = a + CGOLD * (b - a);
+  double w = x, v = x;
+  double fx = gcv_fun_fast(x, lambda, QtGom, ZidOiQ, ZidMi, n_obs);
+  double fw = fx, fv = fx;
+  double d = 0.0, e = 0.0;
+  
+  for (int iter = 0; iter < ITMAX; ++iter) {
+    const double xm = 0.5 * (a + b);
+    const double tol1 = tol * std::abs(x) + ZEPS;
+    const double tol2 = 2.0 * tol1;
+    
+    if (std::abs(x - xm) <= (tol2 - 0.5 * (b - a))) {
+      break;
+    }
+    
+    double p = 0.0, q = 0.0, r = 0.0;
+    
+    if (std::abs(e) > tol1) {
+      r = (x - w) * (fx - fv);
+      q = (x - v) * (fx - fw);
+      p = (x - v) * q - (x - w) * r;
+      q = 2.0 * (q - r);
+      
+      if (q > 0.0) p = -p;
+      q = std::abs(q);
+      
+      const double etemp = e;
+      e = d;
+      
+      if ((std::abs(p) >= std::abs(0.5 * q * etemp)) ||
+          (p <= q * (a - x)) ||
+          (p >= q * (b - x))) {
+        e = (x >= xm ? a - x : b - x);
+        d = CGOLD * e;
+      } else {
+        d = p / q;
+        const double u_test = x + d;
+        if ((u_test - a < tol2) || (b - u_test < tol2)) {
+          d = tol1 * ((xm - x >= 0.0) ? 1.0 : -1.0);
+        }
+      }
+    } else {
+      e = (x >= xm ? a - x : b - x);
+      d = CGOLD * e;
+    }
+    
+    const double u = x + (std::abs(d) >= tol1 ? d : tol1 * ((d > 0.0) ? 1.0 : -1.0));
+    const double fu = gcv_fun_fast(u, lambda, QtGom, ZidOiQ, ZidMi, n_obs);
+    
+    if (fu <= fx) {
+      if (u >= x) a = x; else b = x;
+      v = w; fv = fw;
+      w = x; fw = fx;
+      x = u; fx = fu;
+    } else {
+      if (u < x) a = u; else b = u;
+      if ((fu <= fw) || (w == x)) {
+        v = w; fv = fw;
+        w = u; fw = fu;
+      } else if ((fu <= fv) || (v == x) || (v == w)) {
+        v = u; fv = fu;
+      }
+    }
+  }
+  
+  return x;
+}
+
 // Robust Brent minimizer with grid presearch
 // [[Rcpp::export]]
 double Brent_fmin_robust(double ax, double bx, double tol,
@@ -321,7 +454,7 @@ double Brent_fmin_robust(double ax, double bx, double tol,
   arma::vec fvals(grid_size);
   for (int i = 0; i < grid_size; ++i) {
     double val = gcv_fun(grid[i], lambda, Q, Gom, ZidOi, ZidMi, n_obs);
-    if (!arma::is_finite(val)) val = LARGE_VAL;
+    if (!std::isfinite(val)) val = LARGE_VAL;
     fvals[i] = val;
   }
   
@@ -348,7 +481,7 @@ double Brent_fmin_robust(double ax, double bx, double tol,
     double xstar = Brent_fmin(a_local, b_local, tol,
                               lambda, Q, Gom, ZidOi, ZidMi, n_obs);
     double fstar = gcv_fun(xstar, lambda, Q, Gom, ZidOi, ZidMi, n_obs);
-    if (!arma::is_finite(fstar)) fstar = LARGE_VAL;
+    if (!std::isfinite(fstar)) fstar = LARGE_VAL;
     
     if (fstar < best_f) {
       best_f = fstar;
@@ -358,6 +491,79 @@ double Brent_fmin_robust(double ax, double bx, double tol,
   
   // 5. Fallback: se non ci sono minimi locali, prendi il minimo della griglia
   if (cand_idx.size() == 0) {
+    arma::uword idx_min = fvals.index_min();
+    best_x = grid[idx_min];
+  }
+  
+  return best_x;
+}
+
+// [[Rcpp::export]]
+double Brent_fmin_robust_fast(double ax, double bx, double tol,
+                              const arma::vec& lambda,
+                              const arma::mat& Q,
+                              const arma::mat& QtGom,
+                              const arma::mat& ZidOiQ,
+                              const arma::mat& ZidMi,
+                              int n_obs,
+                              int grid_size = 25) {
+  
+  const double LARGE_VAL = 1e300;
+  arma::vec grid(grid_size);
+  
+  const double log_ax = std::log(ax);
+  const double log_bx = std::log(bx);
+  
+  // 1. Log-scale grid
+  for (int i = 0; i < grid_size; ++i) {
+    grid[i] = std::exp(log_ax + i * (log_bx - log_ax) / (grid_size - 1));
+  }
+  
+  // 2. Evaluate objective on the grid
+  arma::vec fvals(grid_size);
+  for (int i = 0; i < grid_size; ++i) {
+    double val = gcv_fun_fast(grid[i], lambda, QtGom, ZidOiQ, ZidMi, n_obs);
+    if (!std::isfinite(val)) val = LARGE_VAL;
+    fvals[i] = val;
+  }
+  
+  // 3. Find local minima on the grid
+  std::vector<int> cand_idx;
+  for (int i = 1; i < grid_size - 1; ++i) {
+    if (fvals[i] < fvals[i - 1] && fvals[i] < fvals[i + 1]) {
+      cand_idx.push_back(i);
+    }
+  }
+  
+  // 4. Local Brent refinement
+  double best_x = grid[0];
+  double best_f = fvals[0];
+  
+  for (size_t k = 0; k < cand_idx.size(); ++k) {
+    const int idx = cand_idx[k];
+    const int left = std::max(0, idx - 2);
+    const int right = std::min(grid_size - 1, idx + 2);
+    
+    const double a_local = grid[left];
+    const double b_local = grid[right];
+    
+    double xstar = Brent_fmin(a_local, b_local, tol,
+                              lambda, Q, QtGom, ZidOiQ, ZidMi, n_obs);
+    
+    // If your Brent_fmin has the old signature hardcoded to gcv_fun(),
+    // replace this call with a dedicated Brent implementation for gcv_fun_fast().
+    
+    double fstar = gcv_fun_fast(xstar, lambda, QtGom, ZidOiQ, ZidMi, n_obs);
+    if (!std::isfinite(fstar)) fstar = LARGE_VAL;
+    
+    if (fstar < best_f) {
+      best_f = fstar;
+      best_x = xstar;
+    }
+  }
+  
+  // 5. Fallback: minimum over the grid
+  if (cand_idx.empty()) {
     arma::uword idx_min = fvals.index_min();
     best_x = grid[idx_min];
   }
@@ -393,9 +599,9 @@ arma::mat reconsX_internal(const arma::umat& O,
   // Ottimizzazione alpha
   // double alpha_opt = Brent_fmin(1e-12, 1.0, 1e-12,
   //                               lambda, Q, Gom, ZidOi, ZidMi, id_obs.n_elem);
-  double alpha_opt = Brent_fmin_robust(2.22e-16, 100.0, 1e-6,
+  double alpha_opt = Brent_fmin_robust(2.22e-16, 10.0, 1e-6,
                                        lambda, Q, Gom, ZidOi, ZidMi, id_obs.n_elem);
-  if(alpha_opt == 100.0) alpha_opt = 1e-12;
+  // if(alpha_opt == 100.0) alpha_opt = 1e-12;
   // double alpha_opt = gradient_descent(.01, 1e-12, 10.0, lambda, Q, Gom, ZidOi, ZidMi,
   //                                     id_obs.n_elem, 1e-2, 1e-8, 1000);
 
@@ -408,6 +614,88 @@ arma::mat reconsX_internal(const arma::umat& O,
   arma::mat Zi = Z.row(i);
   Zi.cols(Mi) = (Zi.cols(Oi) * A);
 
+  return Zi;
+}
+
+// [[Rcpp::export]]
+arma::rowvec reconstruct_missing_fast(const arma::rowvec& ZiOi,
+                                      const arma::vec& lambda,
+                                      double alpha,
+                                      const arma::mat& Q,
+                                      const arma::mat& QtGom) {
+  
+  const double a = std::max(alpha, 1e-12);
+  arma::vec inv_diag = 1.0 / (lambda + a);
+  
+  arma::rowvec ZiOiQ = ZiOi * Q;
+  arma::mat weighted = QtGom.each_col() % inv_diag;
+  
+  return ZiOiQ * weighted;
+}
+
+// [[Rcpp::export]]
+arma::mat reconsX_internal_fast(const arma::umat& O,
+                                const arma::mat& Z,
+                                const arma::uvec& id_obs,
+                                const arma::mat& G,
+                                arma::uword i,
+                                double alpha) {
+  
+  arma::uvec Oi = arma::find(O.row(i) == 1);
+  arma::uvec Mi = arma::find(O.row(i) == 0);
+  
+  if (Mi.n_elem == 0) {
+    return Z.row(i);
+  }
+  if (Oi.n_elem == 0) {
+    return Z.row(i);
+  }
+  
+  arma::mat ZidOi = Z.submat(id_obs, Oi);
+  arma::mat ZidMi = Z.submat(id_obs, Mi);
+  
+  arma::mat Gom = G.submat(Oi, Mi);
+  arma::mat Goo = G.submat(Oi, Oi);
+  
+  arma::mat Zi = Z.row(i);
+  arma::rowvec ZiOi = Zi.cols(Oi);
+  
+  double alpha_opt;
+  if (alpha > 0.0) {
+    alpha_opt = alpha;
+    
+    arma::mat M_alpha = Goo + alpha_opt * arma::eye<arma::mat>(Goo.n_rows, Goo.n_cols);
+    arma::mat R = arma::chol(M_alpha);
+    
+    // B = solve(M_alpha, Gom)
+    arma::mat Y = arma::solve(arma::trimatl(R.t()), Gom);
+    arma::mat B = arma::solve(arma::trimatu(R), Y);
+    
+    // Fill missing part
+    Zi.cols(Mi) = Zi.cols(Oi) * B;
+  } else {
+    arma::vec lambda;
+    arma::mat Q;
+    arma::eig_sym(lambda, Q, Goo);
+    lambda = arma::clamp(lambda, 0.0, arma::datum::inf);
+    
+    arma::mat QtGom  = Q.t() * Gom;
+    arma::mat ZidOiQ = ZidOi * Q;
+    
+    alpha_opt = Brent_fmin_robust_fast(
+      2.22e-16, 10.0, 1e-6,
+      lambda, Q, QtGom, ZidOiQ, ZidMi, id_obs.n_elem
+    );
+    
+    Zi.cols(Mi) = reconstruct_missing_fast(
+      ZiOi,
+      lambda,
+      alpha_opt,
+      Q,
+      QtGom
+    );
+  }
+  
   return Zi;
 }
 
@@ -839,6 +1127,7 @@ Rcpp::List reconsX(const umat& O,
                    const cube& wTht,
                    bool pendiag,
                    double rho,
+                   double gamma,
                    double alpha,
                    int maxit,
                    double thr,
@@ -863,7 +1152,8 @@ Rcpp::List reconsX(const umat& O,
   for (int idx = 0; idx < N; ++idx) {
     try {
       unsigned int i = id_pobs[idx];
-      X_temp[idx] = reconsX_internal(O, Z, id_obs, G, i);
+      // X_temp[idx] = reconsX_internal(O, Z, id_obs, G, i);
+      X_temp[idx] = reconsX_internal_fast(O, Z, id_obs, G, i, alpha);
     } catch (std::exception& ex) {
       Rcpp::Rcout << "⚠️ Errore nel thread " << idx << ": " << ex.what() << std::endl;
       X_temp[idx] = arma::mat(); // fallback sicuro
@@ -894,7 +1184,7 @@ Rcpp::List reconsX(const umat& O,
   
   arma::cube S = tmp["S"];
   int trace = 0;
-  Rcpp::List tmp2 = admm_tht_sub(p, K, fk, S, wTht, pendiag, rho, alpha,
+  Rcpp::List tmp2 = admm_tht_sub(p, K, fk, S, wTht, pendiag, rho, gamma,
                                  maxit, thr, Tht, trace);
   arma::cube Tht_hat = tmp2["Tht"];
   arma::vec df = tmp2["df"];
