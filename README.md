@@ -1,50 +1,275 @@
-# Gaussian Graphical Models for Partially Observed Multivariate Functional Data
+# Gaussian Graphical Models for Partially Observed Multivariate Functional Data  
+### Code repository for methodology, simulation study, and sovereign ESG application
 
-This repository contains the implementation of the methodology described in **"Gaussian Graphical Models for Partially Observed Multivariate Functional Data"**.
+This repository contains the code accompanying the paper **Gaussian Graphical Models for Partially Observed Multivariate Functional Data**. It includes the core estimation routines, the full simulation framework used to assess finite-sample performance, and the empirical application to the **World Bank Sovereign ESG Data Portal**.
 
-The project provides R and Rcpp code for estimating functional Gaussian graphical models in the presence of partially observed multivariate functional data. The estimation algorithm is based on an EM approach with a joint graphical lasso at the M-step.
+The repository is organized so as to separate clearly:
 
----
+- the **core methodological implementation**;
+- the **simulation experiments**;
+- the **real-data application**.
 
-## General structure and requirements
-
-The general implementation is written in **R**, while all computationally intensive routines are implemented in **C++** using the **Rcpp** and **RcppArmadillo** frameworks.  
-
-All required libraries are loaded in the preamble of each R script.  
-
-Before running the code, ensure that your R environment is properly configured to compile C++ code through Rcpp (a C++ compiler compatible with your R installation is required).
+The overall objective is to provide a reproducible computational companion to the paper.
 
 ---
 
 ## Repository organization
 
-The repository is organized into the following directories:
-
-### **1. Code/**
-Contains the main source code for the proposed methodology: 
-
-- **`pofggm.R`**
-- **`pofggm.cpp`**.
+```text
+GitHub/
+├── 01 - Code/
+│   ├── helper.R
+│   ├── pofggm.R
+│   └── pofggm.cpp
+│
+├── 02-Simulations/
+│   ├── adj_struct.R
+│   ├── results.R
+│   ├── scripts/
+│   │   ├── sim_alpha.R
+│   │   ├── sim_d.R
+│   │   ├── sim_gamma.R
+│   │   ├── sim_L.R
+│   │   ├── sim_missing.R
+│   │   ├── sim_n_p.R
+│   │   ├── sim_part_sep.R
+│   │   └── sim_pev.R
+│   └── output/
+│       ├── figures/
+│       └── tables/
+│
+└── 03-Application/
+    ├── esg.R
+    ├── data/
+    │   ├── raw/
+    │   │   └── esgdata_download-2026-01-09.xlsx
+    │   └── derived/
+    └── output/
+        ├── figures/
+        └── tables/
+```
 
 ---
 
-### **2. Simulations/**
-Contains scripts and results for the Monte Carlo simulation study described in the manuscript.
+## 1. Core methodological code
 
-- **`figures/`**  
-Includes graphical summaries of the simulation results (e.g., \(\text{MSE}_X\), \(\text{MSE}_\Theta\), and AUC plots).  
+The folder `01 - Code` contains the main implementation of the proposed methodology.
+
+### `helper.R`
+Auxiliary functions used throughout the project.  
+This file collects numerical and statistical utilities supporting:
+
+- empirical basis estimation;
+- score integration;
+- reconstruction of functional trajectories;
+- data handling and intermediate computations used by the main fitting routines.
+
+### `pofggm.R`
+Main R implementation of the **partially observed functional Gaussian graphical model**.  
+This script contains the high-level estimation procedures used in both simulations and real-data analysis, including:
+
+- model fitting under partial observation;
+- score imputation within an EM-type framework;
+- estimation along a regularization path;
+- reconstruction and graph-selection routines.
+
+### `pofggm.cpp`
+C++ source file used to accelerate selected computational components of the estimation algorithm.  
+It is intended to support the main R implementation when computational efficiency is required.
 
 ---
 
-### **3. Analysis/**
-Includes the scripts used to process simulation outputs and reproduce the figures reported in the manuscript.
+## 2. Simulation study
 
-- **`DATA/`**  
-  Folder containing the original datasets from the paper Liebl (2019).  
+The folder `02-Simulations` contains the full simulation framework used to evaluate the proposed methodology under a variety of data-generating scenarios.
 
-- **`figs/`**  
-  Includes figures shown in Section 5 of the paper.  
+### `scripts/`
+This subfolder contains the scripts generating simulation outputs for the different designs considered in the paper.
+
+- `sim_n_p.R`  
+  Varies sample size and the dimensionality ratio \(p/n\).
+
+- `sim_missing.R`  
+  Studies the effect of missingness, varying both the proportion of partially observed curves and the proportion of unobserved time points.
+
+- `sim_pev.R`  
+  Studies sensitivity to the proportion of explained variance used in FPCA truncation.
+
+- `sim_L.R`  
+  Varies the number of retained latent basis components.
+
+- `sim_part_sep.R`  
+  Examines the partially separable setting.
+
+- `sim_d.R`  
+  Varies the number of time grid points.
+
+- `sim_gamma.R`  
+  Sensitivity analysis with respect to the graph-selection penalty parameter.
+
+- `sim_alpha.R`  
+  Sensitivity analysis with respect to the score-imputation regularization parameter.
+
+Each script is designed to generate `.RData` files storing the simulation outputs for the corresponding scenario.
+
+### `adj_struct.R`
+Constructs and visualizes the representative graph structures used in the simulation study, including:
+
+- star graphs,
+- banded graphs,
+- small-world graphs.
+
+This script is used to produce the adjacency-structure figure reported in the simulation section.
+
+### `results.R`
+Post-processing script for the simulation study.  
+It loads the `.RData` files generated by the simulation scripts, assembles a tidy table of performance metrics, computes summary statistics, and produces the figures and tables used in the manuscript and supplementary material.
+
+### `output/figures/`
+Contains the simulation figures generated by `results.R`, including both main-text and supplementary plots.
+
+### `output/tables/`
+Contains simulation summary tables exported in `.csv` format, including:
+
+- raw and tidy performance metrics;
+- computational cost summaries;
+- selected summary tables used in the manuscript.
 
 ---
 
-## How to run the code
+## 3. Empirical application: sovereign ESG data
+
+The folder `03-Application` contains the real-data application of the proposed methodology to sovereign ESG indicators.
+
+### `data/raw/`
+Contains the original Excel file used in the empirical application:
+
+- `esgdata_download-2026-01-09.xlsx`
+
+This file is the starting point of the ESG application pipeline.
+
+### `data/derived/`
+Intended to store intermediate derived objects generated during preprocessing and estimation.
+
+### `esg.R`
+Main script for the sovereign ESG application.  
+This file implements the full empirical workflow:
+
+1. reading and filtering the raw World Bank ESG data;
+2. restricting the time span and retained indicators;
+3. preprocessing and normalization of the selected variables;
+4. construction of the multivariate functional data array;
+5. analysis of missingness patterns;
+6. empirical basis estimation via FPCA;
+7. fitting the regularization path for the functional graphical model;
+8. model selection via eBIC;
+9. reconstruction of partially observed curves;
+10. generation of figures and tables used in the paper.
+
+### `output/figures/`
+Contains the main figures produced by the empirical application:
+
+- `missingness_summary.pdf`  
+  Summary of missingness patterns across retained ESG indicators.
+
+- `ebic_esg_network.pdf`  
+  eBIC profile and selected ESG network.
+
+- `esg_network.pdf`  
+  Network visualization alone.
+
+- `cross_cov.pdf`  
+  Estimated cross-covariance surfaces for selected indicator pairs.
+
+- `example_esg.pdf`  
+  Example of observed and reconstructed ESG trajectories.
+
+### `output/tables/`
+Contains tabular summaries generated by the application, including:
+
+- `missingness_table.csv`  
+  Indicator-level summaries of partial observation and missing time support.
+
+- `cross_cov_summary.csv`  
+  Summary statistics for selected estimated cross-covariance surfaces.
+
+---
+
+## Main outputs corresponding to the paper
+
+The main reproducible artifacts used in the manuscript are stored in the following locations:
+
+- **Simulation figures**: `02-Simulations/output/figures/`
+- **Simulation tables**: `02-Simulations/output/tables/`
+- **ESG application figures**: `03-Application/output/figures/`
+- **ESG application tables**: `03-Application/output/tables/`
+
+---
+
+## Computational requirements
+
+The code is written in **R** and relies on standard scientific-computing and visualization packages, including for example:
+
+- `tidyverse`
+- `ggplot2`
+- `patchwork`
+- `readxl`
+- `reshape2`
+- `igraph`
+- `ggraph`
+- `tidygraph`
+- `BDgraph`
+
+Some computational steps also rely on the C++ file `pofggm.cpp`.
+
+Depending on the simulation size and tuning-path length, the numerical experiments may require nontrivial computation time.
+
+---
+
+## Suggested workflow
+
+A natural order for reproducing the results is the following.
+
+### Core methodology
+Load or source the files in `01 - Code/`:
+- `helper.R`
+- `pofggm.R`
+- `pofggm.cpp` as required by the implementation
+
+### Simulation study
+1. Run the scripts in `02-Simulations/scripts/` to generate the `.RData` outputs.
+2. Run `02-Simulations/results.R` to collect metrics and reproduce simulation figures and tables.
+3. Run `02-Simulations/adj_struct.R` to generate the graph-structure illustration.
+
+### Empirical application
+1. Place the ESG Excel file in `03-Application/data/raw/`.
+2. Run `03-Application/esg.R`.
+3. Inspect the resulting tables and figures in `03-Application/output/`.
+
+---
+
+## Reproducibility remarks
+
+This repository is designed as a computational companion to the paper rather than as a packaged software release. As a consequence:
+
+- some scripts may assume that core functions have already been sourced from `01 - Code/`;
+- local paths may need to be adapted if the repository is moved or mirrored;
+- the folder `data/derived/` is intended for intermediate objects created during execution.
+
+For long-run reproducibility, it is recommended to keep the original folder structure unchanged.
+
+---
+
+## Citation
+
+If you use this code or build upon it, please cite the corresponding paper:
+
+**Gaussian Graphical Models for Partially Observed Multivariate Functional Data**.
+
+A complete bibliographic entry can be added here once the publication details are finalized.
+
+---
+
+## Contact
+
+For questions regarding the methodology, the code, or the empirical application, please contact the authors of the paper.
