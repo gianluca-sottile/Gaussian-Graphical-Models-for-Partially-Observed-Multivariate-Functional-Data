@@ -171,7 +171,7 @@ generate_precision_structure <- function(method, p, K, n,
                                          seed = 1234) {
   if (method == "star") {
     out <- lapply(seq_len(K), function(k) {
-      Tht <- rStars(d = p / 3, nstars = 3, tht_min = tht_min, tht_max = tht_max)
+      Tht <- rStars(d = p / 4, nstars = 4, tht_min = tht_min, tht_max = tht_max)
       scale_k <- s1 * k^(-s2)
       Tht <- Tht / scale_k
       Sgm <- solve(Tht)
@@ -229,25 +229,25 @@ generate_precision_structure <- function(method, p, K, n,
 # ============================================================
 
 configs <- expand.grid(
-  perc_window = c(0.25, 0.50, 0.75),
-  perc_obs_curves = c(0.25, 0.50, 0.75),
+  perc_window = 0.50,
+  perc_obs_curves = 0.50,
   n = 100L,
-  p = 15L,
+  p = 20L,
   method = c("star", "band", "smallworld"),
   stringsAsFactors = FALSE
 )
 
 # Indices chosen to display one representative configuration
 # for each graph type
-iconfig_vec <- c(1, 10, 19)
+iconfig_vec <- 1:3
 
 # Common parameters
 d <- 50
-K <- 3
+K <- 5
 tht_min <- 0.4
 tht_max <- 0.5
-s1 <- 1
-s2 <- 0.2
+s1 <- 3
+s2 <- 1.8
 
 # ============================================================
 # 4. Generate structures
