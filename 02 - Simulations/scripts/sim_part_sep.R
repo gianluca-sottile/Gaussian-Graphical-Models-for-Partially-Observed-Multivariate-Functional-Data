@@ -80,7 +80,8 @@ for (iconfig in seq_len(nrow(configs))) {
     tht_min = tht_min,
     tht_max = tht_max,
     s1 = s1,
-    s2 = s2
+    s2 = s2, 
+    seed_base = 1234
   )
   
   out_rPar <- create_full_matrix(out_rPar, alpha = 0.005)
@@ -89,7 +90,7 @@ for (iconfig in seq_len(nrow(configs))) {
   if (!verbose) {
     pb <- txtProgressBar(max = n_sim, style = 3L)
   }
-  
+  NPC <- NULL
   for (isim in seq_len(n_sim)) {
     
     set.seed(1234 + isim)
@@ -177,7 +178,7 @@ for (iconfig in seq_len(nrow(configs))) {
       estimate_empirical_basis(
         X = X_obs,
         tp = tp,
-        pev = pev,
+        pev = .9999,
         smooth_k = 12
       ),
       silent = TRUE
@@ -195,14 +196,16 @@ for (iconfig in seq_len(nrow(configs))) {
       print(basis_fit$ufpca$cumpev)
     }
     
+    NPC <- c(NPC, basis_fit$ufpca$npc)
+    
     # XiEst <- integrate_cube(storage$Xo_save[, , , isim], Phi_emp, tp)
     # plot(tp, storage$Xo_save[, 1, 1, isim], type = "l")
     # lines(tp, tcrossprod(Phi_emp, XiEst[,1,])[, 1], col = "red")
-    
+
     # ----------------------------------------------------------
     # 5. Fit proposed method along the rho path
     # ----------------------------------------------------------
-    
+
     fit_pofggm <- try(
       fit_pofggm_path(
         X = X_obs,
@@ -211,7 +214,7 @@ for (iconfig in seq_len(nrow(configs))) {
         id_pobs = id_pobs,
         id_obs = id_obs,
         perc_rho = perc_rho,
-        gamma = 0.0, 
+        gamma = 0.0,
         alpha = 0.0,
         ncores = ncores,
         verbose = verbose,
@@ -221,21 +224,21 @@ for (iconfig in seq_len(nrow(configs))) {
       ),
       silent = TRUE
     )
-    
+
     if (inherits(fit_pofggm, "try-error")) {
       warning("POFGGM path failed at simulation ", isim)
       next
     }
-    
+
     pofggm_rho <- fit_pofggm$fit_list
     rho_max <- fit_pofggm$rho_max
     grid_rho <- fit_pofggm$grid_rho
     storage$comp_time_vec[isim] <- fit_pofggm$elapsed
-    
+
     # ----------------------------------------------------------
     # 6. Oracle competitor: graph estimation from full curves
     # ----------------------------------------------------------
-    
+
     fit_oracle <- estimate_theta_path_from_curves(
       X_array = X_full,
       Phi = Phi_emp,
@@ -249,31 +252,31 @@ for (iconfig in seq_len(nrow(configs))) {
       trace = 0,
       verbose = verbose
     )
-    
+
     if (!fit_oracle$ok) {
       warning("Oracle path failed at simulation ", isim)
       next
     }
-    
+
     THT_O <- fit_oracle$theta_path
-    
+
     # ----------------------------------------------------------
     # 7. Kraus competitor: impute curves, then estimate graph
     # ----------------------------------------------------------
-    
+
     kraus_fit <- try(
       reconstruct_curves_kraus(X_obs),
       silent = TRUE
     )
-    
+
     if (inherits(kraus_fit, "try-error")) {
       warning("Kraus curve reconstruction failed at simulation ", isim)
       next
     }
-    
+
     result_kraus <- kraus_fit$result_list
     XreconsKrauss <- kraus_fit$X_reconstructed
-    
+
     fit_kraus <- estimate_theta_path_from_curves(
       X_array = XreconsKrauss,
       Phi = Phi_emp,
@@ -287,85 +290,85 @@ for (iconfig in seq_len(nrow(configs))) {
       trace = 0,
       verbose = verbose
     )
-    
+
     if (!fit_kraus$ok) {
       warning("Kraus path failed at simulation ", isim)
       next
     }
-    
+
     THT_K <- fit_kraus$theta_path
-    
+
     # ----------------------------------------------------------
     # 8. Optional plotting
     # ----------------------------------------------------------
-    
+
     if (plot_it) {
       par(mfrow = c(1, 1))
       id_plot <- id_pobs[seq_len(min(2, length(id_pobs)))]
-      
+
       matplot(tp, X_full[, id_plot, 1], type = "l", lty = 1, col = "pink2", lwd = 1.5)
       matpoints(tp, X_obs[, id_plot, 1], pch = 16, col = "black")
-      
+
       matlines(tp, pofggm_rho[[1]]$Ximputed[, id_plot, 1], col = "red2", lty = 2)
       if (length(pofggm_rho) >= 6)  matlines(tp, pofggm_rho[[6]]$Ximputed[, id_plot, 1], col = "blue2", lty = 2)
       if (length(pofggm_rho) >= 11) matlines(tp, pofggm_rho[[11]]$Ximputed[, id_plot, 1], col = "green2", lty = 2)
       if (length(pofggm_rho) >= 16) matlines(tp, pofggm_rho[[16]]$Ximputed[, id_plot, 1], col = "purple", lty = 2)
       if (length(pofggm_rho) >= 21) matlines(tp, pofggm_rho[[21]]$Ximputed[, id_plot, 1], col = "yellow2", lty = 2)
-      
+
       matlines(tp, result_kraus[[1]]$X_reconst[, id_plot], col = "cyan2", lty = 2)
     }
-    
+
     # ----------------------------------------------------------
     # 9. Precision-matrix estimation metrics
     # ----------------------------------------------------------
-    
+
     theta_err_pofggm <- compute_theta_error_path_pofggm(
       fit_list = pofggm_rho,
       theta_true_array = out_rPar$Tht,
       normalize = "fro"
     )
     storage$theta_err_mat[, isim] <- theta_err_pofggm
-    
+
     theta_err_kraus <- compute_theta_error_path(
       theta_hat_list = THT_K,
       theta_true_array = out_rPar$Tht,
       normalize = "fro"
     )
     storage$theta_err_kraus_mat[, isim] <- theta_err_kraus
-    
+
     theta_err_obs <- compute_theta_error_path(
       theta_hat_list = THT_O,
       theta_true_array = out_rPar$Tht,
       normalize = "fro"
     )
     storage$theta_err_obs_mat[, isim] <- theta_err_obs
-    
+
     # ----------------------------------------------------------
     # 10. Graph-recovery metrics
     # ----------------------------------------------------------
-    
+
     res_pofggm <- compute_auc_graph_path_pofggm(
       theta_true_array = out_rPar$Tht,
       fit_list = pofggm_rho
     )
     storage$auc_theta_vec[isim] <- res_pofggm$AUC_ROC
-    
+
     res_kraus <- compute_auc_graph_path(
       theta_true_array = out_rPar$Tht,
       theta_hat_list = THT_K
     )
     storage$auc_theta_kraus_vec[isim] <- res_kraus$AUC_ROC
-    
+
     res_obs <- compute_auc_graph_path(
       theta_true_array = out_rPar$Tht,
       theta_hat_list = THT_O
     )
     storage$auc_theta_obs_vec[isim] <- res_obs$AUC_ROC
-    
+
     # ----------------------------------------------------------
     # 11. Curve reconstruction metrics
     # ----------------------------------------------------------
-    
+
     curve_err_pofggm <- sapply(pofggm_rho, function(fit) {
       compute_imputation_error_missing(
         X_hat = fit$Ximputed,
@@ -376,7 +379,7 @@ for (iconfig in seq_len(nrow(configs))) {
       )
     })
     storage$curve_err_mat[, isim] <- curve_err_pofggm
-    
+
     curve_err_kraus <- compute_imputation_error_missing(
       X_hat = XreconsKrauss,
       X_true = X_full,
@@ -385,11 +388,11 @@ for (iconfig in seq_len(nrow(configs))) {
       relative = TRUE
     )
     storage$curve_err_kraus_vec[isim] <- curve_err_kraus
-    
+
     # ----------------------------------------------------------
     # 12. Intermediate progress report
     # ----------------------------------------------------------
-    
+
     if (isim %% 10L == 0L) {
       temp <- rbind(
         "ThetaError_POFGGM" = rowMeans(storage$theta_err_mat[, seq_len(isim), drop = FALSE], na.rm = TRUE),
