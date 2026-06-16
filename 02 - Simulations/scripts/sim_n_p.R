@@ -24,6 +24,16 @@ tht_max <- 0.5
 s1 <- 3
 s2 <- 1.8
 
+mnorm <- function(Tht_l) {
+  R <- cov2cor(Tht_l)
+  diag(R) <- 0
+  out1 <- norm(R, type = "2")
+  out2 <- max(colSums(abs(R)))
+  Dl <- max(rowSums(abs(R) > 1E-13))
+  out3 <- Dl * max(abs(R))
+  return(c(out1, out2, out3))
+}
+
 # ---------------------------
 # 2. Simulation scenarios
 # ---------------------------
@@ -81,8 +91,27 @@ for (iconfig in seq_len(nrow(configs))) {
     tht_max = tht_max,
     s1 = s1,
     s2 = s2, 
-    seed_base = 1234
+    seed_base = 1235
   )
+  
+  # threshold <- sapply(1:100, \(i) {
+  #   print(i)
+  #   out_rPar <- generate_true_model(
+  #     p = p,
+  #     K_true = K_true,
+  #     graph_type = graph_type,
+  #     perc_theta_share = perc_theta_share,
+  #     tht_min = tht_min,
+  #     tht_max = tht_max,
+  #     s1 = s1,
+  #     s2 = s2, 
+  #     seed_base = i
+  #   )
+  #   mnorm(out_rPar$Tht[,,1])
+  # })
+  # 
+  # rowMeans(threshold)
+  # hist(threshold[1, ])
   
   if (!verbose) {
     pb <- txtProgressBar(max = n_sim, style = 3L)

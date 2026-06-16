@@ -81,7 +81,7 @@ for (iconfig in seq_len(nrow(configs))) {
     tht_max = tht_max,
     s1 = s1,
     s2 = s2, 
-    seed_base = 1234
+    seed_base = 1235
   )
   
   if (!verbose) {

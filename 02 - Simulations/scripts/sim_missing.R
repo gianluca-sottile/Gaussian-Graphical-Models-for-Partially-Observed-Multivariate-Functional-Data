@@ -81,8 +81,23 @@ for (iconfig in seq_len(nrow(configs))) {
     tht_max = tht_max,
     s1 = s1,
     s2 = s2, 
-    seed_base = 1234
+    seed_base = 1235
   )
+  
+  # sapply(seq_len(100), \(i) {
+  #   out_rPar <- generate_true_model(
+  #     p = p,
+  #     K_true = K_true,
+  #     graph_type = graph_type,
+  #     perc_theta_share = perc_theta_share,
+  #     tht_min = tht_min,
+  #     tht_max = tht_max,
+  #     s1 = s1,
+  #     s2 = s2, 
+  #     seed_base = 1234 + i
+  #   )
+  #   mnorm(out_rPar$Tht[,,1])
+  # })
   
   if (!verbose) {
     pb <- txtProgressBar(max = n_sim, style = 3L)
@@ -369,7 +384,7 @@ for (iconfig in seq_len(nrow(configs))) {
     # 12. Intermediate progress report
     # ----------------------------------------------------------
     
-    if (isim %% 10L == 0L) {
+    if (isim > 1) {
       temp <- rbind(
         "ThetaError_POFGGM" = rowMeans(storage$theta_err_mat[, seq_len(isim), drop = FALSE], na.rm = TRUE),
         "ThetaError_Kraus" = rowMeans(storage$theta_err_kraus_mat[, seq_len(isim), drop = FALSE], na.rm = TRUE),
@@ -381,7 +396,7 @@ for (iconfig in seq_len(nrow(configs))) {
         "CurveError_Kraus" = mean(storage$curve_err_kraus_vec[seq_len(isim)], na.rm = TRUE),
         "ComputationalTime_POFGGM" = mean(storage$comp_time_vec[seq_len(isim)], na.rm = TRUE)
       )
-      print(round(temp[, seq(1, n_rho, by = 2L)], digits = 4L))
+      print(round(temp, digits = 4L))
       save.image(paste0("~/Downloads/jcgs_simul_missing_config", iconfig, ".Rdata"))
     }
   }

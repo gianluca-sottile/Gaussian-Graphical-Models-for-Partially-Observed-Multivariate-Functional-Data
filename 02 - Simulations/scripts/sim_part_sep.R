@@ -81,10 +81,25 @@ for (iconfig in seq_len(nrow(configs))) {
     tht_max = tht_max,
     s1 = s1,
     s2 = s2, 
-    seed_base = 1234
+    seed_base = 1235
   )
   
-  out_rPar <- create_full_matrix(out_rPar, alpha = 0.005)
+  sigma_ps <- bdiag_base(array2list(out_rPar$Sgm))
+  omega_star <- lapply(array2list(out_rPar$Tht), \(x) x - diag(diag(x)))
+  omega <- bdiag_base(array2list(out_rPar$Tht))
+  id <- rep(seq_len(K_true), each = p)
+  for(k in seq_len(K_true - 1)) {
+    omega[id == k, id == (k+1)] <- 0.01 * (omega_star[[k]] + omega_star[[(k+1)]])
+    omega[id == (k+1), id == k] <- t(omega[id == k, id == (k+1)])
+  }
+  d_half <- sqrt(diag(sigma_ps))
+  sigma_non_ps <- diag(d_half) %*% solve(omega) %*% diag(d_half)
+  eigen(sigma_non_ps, symmetric = TRUE, only.values = TRUE)$values
+  
+  out_rPar$Tht_full <- omega
+  out_rPar$Sgm_full <- sigma_non_ps
+  
+  # out_rPar <- create_full_matrix(out_rPar, alpha = 0.001)
   # eigen(out_rPar$Tht_full, symmetric = TRUE, only.values = TRUE)$values
   
   if (!verbose) {
@@ -115,24 +130,24 @@ for (iconfig in seq_len(nrow(configs))) {
     # 2. Simulate latent scores and full curves
     # ----------------------------------------------------------
     
-    sim_data <- simulate_scores_and_curves(
-      Sgm_array = out_rPar$Sgm,
-      Phi = Phi,
-      n = n,
-      p = p,
-      K_true = K_true
-    )
+    # sim_data <- simulate_scores_and_curves(
+    #   Sgm_array = out_rPar$Sgm,
+    #   Phi = Phi,
+    #   n = n,
+    #   p = p,
+    #   K_true = K_true
+    # )
     
     Xi_full <- MASS::mvrnorm(n = n, mu = rep(0, p * K_true), Sigma = out_rPar$Sgm_full)
     id.xi <- rep(seq_len(p), K_true)
     
     lapply(seq_len(p), \(h){
-      hh <- id.xi == 1L
+      hh <- id.xi == h
       Xi_full[, hh, drop = FALSE]
     }) |> list2array() -> Xi
     
     lapply(seq_len(p), \(h){
-      hh <- id.xi == 1L
+      hh <- id.xi == h
       tcrossprod(Phi, Xi_full[, hh, drop = FALSE])
     }) |> list2array() -> X
     
@@ -178,7 +193,7 @@ for (iconfig in seq_len(nrow(configs))) {
       estimate_empirical_basis(
         X = X_obs,
         tp = tp,
-        pev = .9999,
+        pev = pev,
         smooth_k = 12
       ),
       silent = TRUE
@@ -328,7 +343,19 @@ for (iconfig in seq_len(nrow(configs))) {
       normalize = "fro"
     )
     storage$theta_err_mat[, isim] <- theta_err_pofggm
-
+    
+    # Theta_TRUE <- as.matrix(Matrix::bdiag(list(out_rPar$Tht_full, 
+    #                                            as.matrix(Matrix::bdiag(array2list(replicate(basis_fit$ufpca$npc - K_true, matrix(0, p, p))))))))
+    # Theta_POFGGM <- lapply(seq_len(length(perc_rho)), \(r) as.matrix(Matrix::bdiag(array2list(pofggm_rho[[r]]$Tht.hat))))
+    # Theta_KRAUS <- lapply(seq_len(length(perc_rho)), \(r) as.matrix(Matrix::bdiag(array2list(THT_K[[r]]))))
+    # Theta_ORACLE <- lapply(seq_len(length(perc_rho)), \(r) as.matrix(Matrix::bdiag(array2list(THT_O[[r]]))))
+    # sapply(seq_len(length(perc_rho)), \(r) 
+    #        relative_theta_error_layer_fro(theta_hat = Theta_POFGGM[[r]], theta_true = Theta_TRUE))
+    # sapply(seq_len(length(perc_rho)), \(r) 
+    #        relative_theta_error_layer_fro(theta_hat = Theta_KRAUS[[r]], theta_true = Theta_TRUE))  
+    # sapply(seq_len(length(perc_rho)), \(r) 
+    #        relative_theta_error_layer_fro(theta_hat = Theta_ORACLE[[r]], theta_true = Theta_TRUE))  
+    
     theta_err_kraus <- compute_theta_error_path(
       theta_hat_list = THT_K,
       theta_true_array = out_rPar$Tht,
@@ -405,7 +432,7 @@ for (iconfig in seq_len(nrow(configs))) {
         "CurveError_Kraus" = mean(storage$curve_err_kraus_vec[seq_len(isim)], na.rm = TRUE),
         "ComputationalTime_POFGGM" = mean(storage$comp_time_vec[seq_len(isim)], na.rm = TRUE)
       )
-      print(round(temp[, seq(1, n_rho, by = 2L)], digits = 4L))
+      print(round(temp, digits = 4L))
       save.image(paste0("~/Downloads/jcgs_simul_part_sep_config", iconfig, ".Rdata"))
     }
   }
