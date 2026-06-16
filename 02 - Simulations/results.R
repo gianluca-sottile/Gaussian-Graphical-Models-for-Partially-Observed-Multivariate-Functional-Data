@@ -9,14 +9,6 @@
 # Main outputs:
 #   - output/tables/*.csv
 #   - output/figures/*.pdf
-#
-# Notes:
-#   - This script replaces the original monolithic plotting script
-#     with a structured, repository-friendly workflow.
-#   - It assumes that files named
-#       jcgs_simul_<scenario>_config<id>.RData
-#     are available in RESULTS_DIR.
-#   - Each .RData file is expected to contain an object named `storage`.
 # ============================================================
 
 # ============================================================
@@ -26,6 +18,7 @@
 suppressPackageStartupMessages({
   library(tidyverse)
   library(here)
+  library(ggh4x)
   library(patchwork)
 })
 
@@ -152,7 +145,7 @@ CONFIGS_list <- list(
     perc_window = 0.5,
     perc_obs_curves = 0.5,
     pev = 0.99,
-    perc_theta_share = c(1.0, 0.5),
+    perc_theta_share = 1.0,
     d = 50L,
     graph_type = c("star", "band", "smallworld")
   ),
@@ -210,22 +203,22 @@ metric_spec_default <- tribble(
 metric_spec_gamma <- tribble(
   ~method,   ~metric,              ~storage_name,           ~aggregator, ~gamma, ~alpha,
   "poFGGM", "ThetaError",         "theta_err_mat",        "min_col",  "0.0", "best",
-  "poFGGM", "ThetaError",         "theta_err_mat_2",      "min_col",  "0.5", "best",
-  "poFGGM", "ThetaError",         "theta_err_mat_3",      "min_col",  "1.0", "best",
-  "Kraus",  "ThetaError",         "theta_err_kraus_mat",  "min_col",  "0.0", "best",
-  "Oracle", "ThetaError",         "theta_err_obs_mat",    "min_col",  "0.0", "none",
+  "poFGGM", "ThetaError",         "theta_err_mat_2",      "min_col",  "best", "best",
+  # "poFGGM", "ThetaError",         "theta_err_mat_3",      "min_col",  "1.0", "best",
+  # "Kraus",  "ThetaError",         "theta_err_kraus_mat",  "min_col",  "0.0", "best",
+  # "Oracle", "ThetaError",         "theta_err_obs_mat",    "min_col",  "0.0", "none",
   "poFGGM", "AUC",                "auc_theta_vec",        "identity", "0.0", "best",
-  "poFGGM", "AUC",                "auc_theta_vec_2",      "identity", "0.5", "best",
-  "poFGGM", "AUC",                "auc_theta_vec_3",      "identity", "1.0", "best",
-  "Kraus",  "AUC",                "auc_theta_kraus_vec",  "identity", "0.0", "best",
-  "Oracle", "AUC",                "auc_theta_obs_vec",    "identity", "0.0", "none",
+  "poFGGM", "AUC",                "auc_theta_vec_2",      "identity", "best", "best",
+  # "poFGGM", "AUC",                "auc_theta_vec_3",      "identity", "1.0", "best",
+  # "Kraus",  "AUC",                "auc_theta_kraus_vec",  "identity", "0.0", "best",
+  # "Oracle", "AUC",                "auc_theta_obs_vec",    "identity", "0.0", "none",
   "poFGGM", "CurveError",         "curve_err_mat",        "min_col",  "0.0", "best",
-  "poFGGM", "CurveError",         "curve_err_mat_2",      "min_col",  "0.5", "best",
-  "poFGGM", "CurveError",         "curve_err_mat_3",      "min_col",  "1.0", "best",
-  "Kraus",  "CurveError",         "curve_err_kraus_vec",  "identity", "0.0", "best",
-  "poFGGM", "ComputationalTime",  "comp_time_vec",        "identity", "0.0", "best",
-  "poFGGM", "ComputationalTime",  "comp_time_vec_2",      "identity", "0.5", "best",
-  "poFGGM", "ComputationalTime",  "comp_time_vec_3",      "identity", "1.0", "best"
+  "poFGGM", "CurveError",         "curve_err_mat_2",      "min_col",  "best", "best"#,
+  # "poFGGM", "CurveError",         "curve_err_mat_3",      "min_col",  "1.0", "best",
+  # "Kraus",  "CurveError",         "curve_err_kraus_vec",  "identity", "0.0", "best",
+  # "poFGGM", "ComputationalTime",  "comp_time_vec",        "identity", "0.0", "best",
+  # "poFGGM", "ComputationalTime",  "comp_time_vec_2",      "identity", "0.5", "best",
+  # "poFGGM", "ComputationalTime",  "comp_time_vec_3",      "identity", "1.0", "best"
 )
 
 metric_spec_alpha <- tribble(
@@ -258,8 +251,8 @@ metric_spec_alpha <- tribble(
 )
 
 apply_aggregator <- function(x, aggregator) {
-  if (aggregator == "min_col") return(apply(x, 2, min))
-  if (aggregator == "identity") return(x)
+  if (aggregator == "min_col") return(apply(x, 2, min, na.rm = TRUE))
+  if (aggregator == "identity") return(x[x != 0])
   stop("Unknown aggregator: ", aggregator)
 }
 
@@ -324,13 +317,15 @@ METRICS <- purrr::map_dfr(seq_along(CONFIGS_list), function(i_cfg_set) {
 
 write.csv(METRICS, file.path(TABLES_DIR, "simulation_metrics_raw.csv"), row.names = FALSE)
 
+METRICS %>% summary
+
 # ============================================================
 # 4. Factor coding and summaries
 # ============================================================
 
 METRICS <- METRICS %>%
   mutate(
-    method = factor(method, levels = c("Oracle", "Kraus", "poFGGM")),
+    method = factor(method, levels = c("Oracle", "poFGGM", "Kraus")),
     metric = factor(metric, levels = c("ThetaError", "AUC", "CurveError", "ComputationalTime")),
     scenario = factor(scenario, levels = c("p_and_n", "missing", "pev", "L", "part_sep", "d", "gamma", "alpha")),
     n = factor(as.character(n), levels = c("50", "100")),
@@ -340,8 +335,10 @@ METRICS <- METRICS %>%
     pi_d = factor(as.character(pi_d), levels = c("0.3", "0.5", "0.7")),
     d = factor(as.character(d), levels = c("50", "100", "200")),
     pev = factor(as.character(pev), levels = c("0.9", "0.95", "0.99"), labels = c("0.90", "0.95", "0.99")),
-    gamma = factor(as.character(gamma), levels = c("0.0", "0.5", "1.0")),
-    perc_theta_share = factor(as.character(perc_theta_share), levels = c("1", "0.5"), labels = c("1.0", "0.5")),
+    # gamma = factor(as.character(gamma), levels = c("0.0", "0.5", "1.0", )),
+    gamma = factor(as.character(gamma), levels = c("0.0", "best")),
+    # perc_theta_share = factor(as.character(perc_theta_share), levels = c("1", "0.5"), labels = c("1.0", "0.5")),
+    perc_theta_share = factor(as.character(perc_theta_share), levels = c("1"), labels = c("1.0")),
     alpha = factor(alpha, levels = c("best", "10^0*mean", "10^2*mean", "10^4*mean", "10^6*mean", "none")),
     graph_type = factor(graph_type, levels = c("star", "band", "smallworld"))
   )
@@ -369,7 +366,7 @@ metric_labeller <- as_labeller(c(
   CurveError = "min[gamma[1]]~Err[X]"
 ), label_parsed)
 
-method_fill <- c("Oracle" = "gray10", "Kraus" = "gray50", "poFGGM" = "gray90")
+method_fill <- c("Oracle" = "gray10", "poFGGM" = "gray50", "Kraus" = "gray90")
 
 theme_boxpaper <- function() {
   theme_bw() +
@@ -463,23 +460,27 @@ plot_alpha_sensitivity <- function(data, title = NULL) {
 }
 
 plot_gamma_sensitivity <- function(data, title = NULL) {
-  gamma_col_labeller <- as_labeller(c(
-    "1.0" = "'100%'",
-    "0.5" = "'50%'"
-  ), label_parsed)
+  # gamma_col_labeller <- as_labeller(c(
+  #   "1.0" = "'100%'",
+  #   "0.5" = "'50%'"
+  # ), label_parsed)
   
   ggplot(data, aes(x = gamma, y = val, fill = gamma)) +
     geom_boxplot(outlier.shape = NA) +
     facet_grid(
-      rows = vars(metric), cols = vars(perc_theta_share), scales = "free_y",
-      labeller = labeller(metric = metric_labeller, perc_theta_share = gamma_col_labeller)
+      rows = vars(metric), scales = "free_y",
+      labeller = labeller(metric = metric_labeller)
+      # rows = vars(metric), cols = vars(perc_theta_share), scales = "free_y",
+      # labeller = labeller(metric = metric_labeller, perc_theta_share = gamma_col_labeller)
     ) +
     scale_fill_manual(
-      values = c("0.0" = "gray10", "0.5" = "gray50", "1.0" = "gray90"),
+      # values = c("0.0" = "gray10", "0.5" = "gray50", "1.0" = "gray90"),
+      values = c("0.0" = "gray10", "best" = "gray90"),
       labels = c(
         expression(gamma[2] == 0.0),
-        expression(gamma[2] == 0.5),
-        expression(gamma[2] == 1.0)
+        expression(gamma[2]^best)
+        # expression(gamma[2] == 0.5),
+        # expression(gamma[2] == 1.0)
       )
     ) +
     theme_boxpaper() +
@@ -508,9 +509,248 @@ main_np_table <- bind_rows(
 ) %>%
   filter(n == "100") %>%
   arrange(metric, n, p_over_n, method) %>%
-  select(metric, method, n, p_over_n, summary)
+  dplyr::select(metric, method, n, p_over_n, summary)
 
 write.csv(main_np_table, file.path(TABLES_DIR, "table_np_smallworld_n100.csv"), row.names = FALSE)
+
+p_p_and_n_smallworld <- METRICS %>%
+  filter(
+    scenario == "p_and_n",
+    graph_type == "smallworld",
+    metric %in% c("ThetaError", "AUC", "CurveError"),
+    n == "100",
+    !is.na(val)
+  ) %>% 
+  mutate(p_over_n = factor(p_over_n, labels = c(20, 120))) %>%
+  ggplot(aes(x = p_over_n, y = val, fill = method)) +
+  geom_boxplot(outlier.shape = NA) +
+  facet_grid2(
+    cols = vars(metric),
+    scales = "free_y",
+    independent = "y",
+    labeller = labeller(metric = metric_labeller)
+  ) +
+  scale_fill_manual(values = method_fill) +
+  theme_boxpaper() +
+  labs(x = expression(p), y = NULL, title = NULL) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "italic")
+  )
+
+p_L_smallworld <- METRICS %>%
+  filter(
+    scenario == "L",
+    graph_type == "smallworld",
+    metric %in% c("ThetaError", "AUC", "CurveError"),
+    n == "100",
+    !is.na(val)
+  ) %>% 
+  mutate(L = factor(L, labels = c(5, 9))) %>%
+  ggplot(aes(x = L, y = val, fill = method)) +
+  geom_boxplot(outlier.shape = NA) +
+  facet_grid2(
+    cols = vars(metric),
+    scales = "free_y",
+    independent = "y",
+    labeller = labeller(metric = metric_labeller)
+  ) +
+  scale_fill_manual(values = method_fill) +
+  theme_boxpaper() +
+  labs(x = expression(L), y = NULL, title = NULL) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "italic")
+  )
+
+p_missing_w_smallworld <- METRICS %>%
+  filter(
+    scenario == "missing",
+    graph_type == "smallworld",
+    metric %in% c("ThetaError", "AUC", "CurveError"),
+    n == "100",
+    pi_d == 0.5,
+    !is.na(val)
+  ) %>% 
+  mutate(pi_po = factor(pi_po, labels = c(0.3, 0.5, 0.7))) %>%
+  ggplot(aes(x = pi_po, y = val, fill = method)) +
+  geom_boxplot(outlier.shape = NA) +
+  facet_grid2(
+    cols = vars(metric),
+    scales = "free_y",
+    independent = "y",
+    labeller = labeller(metric = metric_labeller)
+  ) +
+  scale_fill_manual(values = method_fill) +
+  theme_boxpaper() +
+  labs(x = expression(pi[po]), y = NULL, title = NULL) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "italic")
+  )
+
+p_missing_po_smallworld <- METRICS %>%
+  filter(
+    scenario == "missing",
+    graph_type == "smallworld",
+    metric %in% c("ThetaError", "AUC", "CurveError"),
+    n == "100",
+    pi_po == 0.5,
+    !is.na(val)
+  ) %>% 
+  mutate(pi_d = factor(pi_d, labels = c(0.3, 0.5, 0.7))) %>%
+  ggplot(aes(x = pi_d, y = val, fill = method)) +
+  geom_boxplot(outlier.shape = NA) +
+  facet_grid2(
+    cols = vars(metric),
+    scales = "free_y",
+    independent = "y",
+    labeller = labeller(metric = metric_labeller)
+  ) +
+  scale_fill_manual(values = method_fill) +
+  theme_boxpaper() +
+  labs(x = expression(pi[w]), y = NULL, title = NULL) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "italic")
+  )
+
+p_ps_smallworld <- METRICS %>%
+  filter(
+    scenario %in% c("p_and_n", "part_sep"),
+    graph_type == "smallworld",
+    metric %in% c("ThetaError", "AUC", "CurveError"),
+    n == "100",
+    p_over_n == "0.2",
+    !is.na(val)
+  ) %>% 
+  mutate(scenario = factor(scenario, labels = c("Yes", "No"))) %>%
+  ggplot(aes(x = scenario, y = val, fill = method)) +
+  geom_boxplot(outlier.shape = NA) +
+  facet_grid2(
+    cols = vars(metric),
+    scales = "free_y",
+    independent = "y",
+    labeller = labeller(metric = metric_labeller)
+  ) +
+  scale_fill_manual(values = method_fill) +
+  theme_boxpaper() +
+  labs(x = "Partial separability holds", y = NULL, title = NULL) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "italic")
+  )
+
+p_pve_smallworld <- METRICS %>%
+  filter(
+    scenario %in% c("pev"),
+    graph_type == "smallworld",
+    metric %in% c("ThetaError", "AUC", "CurveError"),
+    n == "100",
+    !is.na(val)
+  ) %>% 
+  mutate(pev = factor(pev, labels = c(0.90, 0.95, 0.99))) %>%
+  ggplot(aes(x = pev, y = val, fill = method)) +
+  geom_boxplot(outlier.shape = NA) +
+  facet_grid2(
+    cols = vars(metric),
+    scales = "free_y",
+    independent = "y",
+    labeller = labeller(metric = metric_labeller)
+  ) +
+  scale_fill_manual(values = method_fill) +
+  theme_boxpaper() +
+  labs(x = "PVE", y = NULL, title = NULL) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "italic")
+  )
+
+p_alpha_smallworld <- METRICS %>%
+  filter(
+    scenario %in% c("alpha"),
+    method == "poFGGM",
+    graph_type == "smallworld",
+    metric %in% c("ThetaError", "AUC", "CurveError"),
+    n == "100",
+    !is.na(val)
+  ) %>% 
+  ggplot(aes(x = alpha, y = val, fill = method)) +
+  geom_boxplot(outlier.shape = NA) +
+  facet_grid2(
+    cols = vars(metric),
+    scales = "free_y",
+    independent = "y",
+    labeller = labeller(metric = metric_labeller)
+  ) +
+  scale_x_discrete(
+    breaks = levels(factor(METRICS$alpha)),
+    labels = c(
+      expression(hat(alpha)),
+      expression(10^0 * bar(alpha)),
+      expression(10^2 * bar(alpha)),
+      expression(10^4 * bar(alpha)),
+      expression(10^6 * bar(alpha))
+    )
+  ) + 
+  scale_fill_manual(values = method_fill) +
+  theme_boxpaper() +
+  labs(x = NULL, y = NULL, title = NULL) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, size = 14, face = "italic")
+  )
+
+p_gamma_smallworld <- METRICS %>%
+  filter(
+    scenario %in% c("gamma"),
+    method == "poFGGM",
+    graph_type == "smallworld",
+    metric %in% c("ThetaError", "AUC", "CurveError"),
+    n == "100",
+    !is.na(val)
+  ) %>% 
+  ggplot(aes(x = gamma, y = val, fill = method)) +
+  geom_boxplot(outlier.shape = NA) +
+  facet_grid2(
+    cols = vars(metric),
+    scales = "free_y",
+    independent = "y",
+    labeller = labeller(metric = metric_labeller)
+  ) +
+  scale_x_discrete(
+    breaks = levels(factor(METRICS$gamma)),
+    labels = c(
+      expression(gamma[2] == 0.0),
+      expression(gamma[2]^best)
+    )
+  ) + 
+  scale_fill_manual(values = method_fill) +
+  theme_boxpaper() +
+  labs(x = NULL, y = NULL, title = NULL) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5, size = 14, face = "italic")
+  )
+
+ggsave(file.path(FIGURES_DIR, "p_and_n.pdf"), p_p_and_n_smallworld,
+       device = "pdf", width = 10, height = 5, units = "in", dpi = 300)
+
+ggsave(file.path(FIGURES_DIR, "L.pdf"), p_L_smallworld,
+       device = "pdf", width = 10, height = 5, units = "in", dpi = 300)
+
+ggsave(file.path(FIGURES_DIR, "pi_w.pdf"), p_missing_w_smallworld,
+       device = "pdf", width = 10, height = 5, units = "in", dpi = 300)
+
+ggsave(file.path(FIGURES_DIR, "pi_po.pdf"), p_missing_po_smallworld,
+       device = "pdf", width = 10, height = 5, units = "in", dpi = 300)
+
+ggsave(file.path(FIGURES_DIR, "pi_ps.pdf"), p_ps_smallworld,
+       device = "pdf", width = 10, height = 5, units = "in", dpi = 300)
+
+ggsave(file.path(FIGURES_DIR, "pve.pdf"), p_pve_smallworld,
+       device = "pdf", width = 10, height = 5, units = "in", dpi = 300)
+
+ggsave(file.path(FIGURES_DIR, "alpha.pdf"), p_alpha_smallworld,
+       device = "pdf", width = 10, height = 5, units = "in", dpi = 300)
+
+ggsave(file.path(FIGURES_DIR, "gamma.pdf"), p_gamma_smallworld,
+       device = "pdf", width = 10, height = 5, units = "in", dpi = 300)
+
 
 # Computational cost tables by graph type
 for (gtype in c("smallworld", "star", "band")) {
@@ -519,355 +759,380 @@ for (gtype in c("smallworld", "star", "band")) {
     time_in_minutes = TRUE
   ) %>%
     arrange(graph_type, scenario) %>%
-    select(graph_type, scenario, n, p_over_n, pi_po, pi_d, pev, L, d, gamma, alpha, summary)
+    dplyr::select(graph_type, scenario, n, p_over_n, pi_po, pi_d, pev, L, d, gamma, alpha, summary)
   
   write.csv(comp_tab, file.path(TABLES_DIR, paste0("computational_cost_", gtype, ".csv")), row.names = FALSE)
 }
 
-# ============================================================
-# 7. Main-paper figures (small-world)
-# ============================================================
-
-# Missingness figure
-missing_col_labeller <- as_labeller(c(
-  `0.3` = "pi[po] == 0.3",
-  `0.5` = "pi[po] == 0.5",
-  `0.7` = "pi[po] == 0.7"
-), label_parsed)
-
-p_missing_smallworld <- METRICS %>%
-  filter(scenario == "missing", graph_type == "smallworld", metric %in% c("ThetaError", "AUC", "CurveError")) %>%
-  ggplot(aes(x = pi_d, y = val, fill = method)) +
-  geom_boxplot(outlier.shape = NA) +
-  facet_grid(
-    rows = vars(metric), cols = vars(pi_po), scales = "free_y",
-    labeller = labeller(metric = metric_labeller, pi_po = missing_col_labeller)
-  ) +
-  scale_fill_manual(values = method_fill) +
-  theme_boxpaper() +
-  labs(x = expression(pi[w]), y = "")
-
-ggsave(file.path(FIGURES_DIR, "missing.pdf"), p_missing_smallworld,
-       device = "pdf", width = 10, height = 9, units = "in", dpi = 300)
-
-# PEV and L figure
-pev_col_labeller <- as_labeller(c(
-  `0.90` = "PEV == 0.90",
-  `0.95` = "PEV == 0.95",
-  `0.99` = "PEV == 0.99"
-), label_parsed)
-
-L_col_labeller <- as_labeller(c(
-  `5` = "L == 5",
-  `9` = "L == 9"
-), label_parsed)
-
-p_pev <- METRICS %>%
-  filter(scenario == "pev", graph_type == "smallworld", metric %in% c("ThetaError", "AUC", "CurveError")) %>%
-  ggplot(aes(x = method, y = val, fill = method)) +
-  geom_boxplot(outlier.shape = NA) +
-  facet_grid(
-    rows = vars(metric), cols = vars(pev), scales = "free_y",
-    labeller = labeller(metric = metric_labeller, pev = pev_col_labeller)
-  ) +
-  scale_fill_manual(values = method_fill) +
-  theme_boxpaper() +
-  labs(x = NULL, y = NULL) +
-  theme(axis.text.x = element_blank())
-
-p_L <- METRICS %>%
-  filter(scenario == "L", graph_type == "smallworld", metric %in% c("ThetaError", "AUC", "CurveError")) %>%
-  ggplot(aes(x = method, y = val, fill = method)) +
-  geom_boxplot(outlier.shape = NA) +
-  facet_grid(
-    rows = vars(metric), cols = vars(L), scales = "free_y",
-    labeller = labeller(metric = metric_labeller, L = L_col_labeller)
-  ) +
-  scale_fill_manual(values = method_fill) +
-  theme_boxpaper() +
-  labs(x = NULL, y = NULL) +
-  theme(axis.text.x = element_blank())
-
-combined_pev_L <- (p_pev + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) +
-  p_L +
-  plot_layout(widths = c(1.1, 1), guides = "collect") &
-  theme(legend.position = "bottom")
-
-ggsave(file.path(FIGURES_DIR, "pev_l.pdf"), combined_pev_L,
-       device = "pdf", width = 12, height = 8, units = "in", dpi = 300)
-
-# Sensitivity figure: small-world
-p_alpha_sw <- METRICS %>%
-  filter(
-    scenario == "alpha", method == "poFGGM",
-    alpha %in% c("best", "10^0*mean", "10^2*mean", "10^4*mean", "10^6*mean"),
-    graph_type == "smallworld", metric %in% c("ThetaError", "AUC", "CurveError")
-  ) %>%
-  plot_alpha_sensitivity(title = "(i)")
-
-p_gamma_sw <- METRICS %>%
-  filter(scenario == "gamma", method == "poFGGM", graph_type == "smallworld", metric %in% c("ThetaError", "AUC", "CurveError")) %>%
-  plot_gamma_sensitivity(title = "(ii)")
-
-p_d_sw <- METRICS %>%
-  filter(scenario == "d", graph_type == "smallworld", metric %in% c("ThetaError", "AUC", "CurveError")) %>%
-  ggplot(aes(x = method, y = val, fill = method)) +
-  geom_boxplot(outlier.shape = NA) +
-  facet_grid(rows = vars(metric), cols = vars(d), scales = "free_y", labeller = labeller(metric = metric_labeller)) +
-  scale_fill_manual(values = method_fill) +
-  theme_boxpaper() +
-  labs(x = NULL, y = NULL, title = "(iii)") +
-  theme(axis.text.x = element_blank(), plot.title = element_text(hjust = 0.5, size = 14, face = "italic"))
-
-p_part_sep_sw <- METRICS %>%
-  filter(scenario == "part_sep", graph_type == "smallworld", metric %in% c("ThetaError", "AUC", "CurveError")) %>%
-  ggplot(aes(x = method, y = val, fill = method)) +
-  geom_boxplot(outlier.shape = NA) +
-  facet_grid(rows = vars(metric), scales = "free_y", labeller = labeller(metric = metric_labeller)) +
-  scale_fill_manual(values = method_fill) +
-  theme_boxpaper() +
-  labs(x = NULL, y = NULL, title = "(iv)") +
-  theme(axis.text.x = element_blank(), plot.title = element_text(hjust = 0.5, size = 14, face = "italic"))
-
-combined_sens_sw <- ((p_alpha_sw + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) + p_gamma_sw) +
-  ((p_d_sw + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) +
-     p_part_sep_sw +
-     plot_layout(guides = "collect", design = c(area(1, 1, 1, 2), area(1, 3, 1, 3))) &
-     theme(legend.position = "bottom")) +
-  plot_layout(
-    design = c(
-      area(1, 1, 1, 1),
-      area(1, 2, 1, 3),
-      area(2, 1, 2, 3)
-    )
-  )
-
-ggsave(file.path(FIGURES_DIR, "sens_an.pdf"), combined_sens_sw,
-       device = "pdf", width = 14, height = 14, units = "in", dpi = 300)
-
-# ============================================================
-# 8. Supplementary figures by graph type
-# ============================================================
-
-# Helper to save patchwork object
-save_pdf <- function(plot_obj, filename, width, height) {
-  ggsave(file.path(FIGURES_DIR, filename), plot_obj,
-         device = "pdf", width = width, height = height,
-         units = "in", dpi = 300, scale = .7)
-}
-
-p_n50 <- p_n100 <- setNames(vector(mode = "list", length = 2L), nm = c("star", "band"))
-
-# p_and_n: star and band
-for (gtype in c("star", "band")) {
-  p_n50[[gtype]] <- METRICS %>%
-    filter(scenario == "p_and_n", graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError"), n == "50") %>%
-    ggplot(aes(x = method, y = val, fill = method)) +
-    geom_boxplot(outlier.shape = NA) +
-    facet_grid(
-      rows = vars(metric), cols = vars(p_over_n), scales = "free_y",
-      labeller = labeller(
-        metric = metric_labeller,
-        p_over_n = as_labeller(c(`0.2` = "p/n == 0.2", `1.2` = "p/n == 1.2"), label_parsed)
-      )
-    ) +
-    scale_fill_manual(values = method_fill) +
-    theme_boxpaper() +
-    labs(x = NULL, y = ifelse(gtype == "star", "Star graph structure", "Banded graph structure"), title = expression(n == 50)) +
-    theme(
-      axis.text.x = element_blank(),
-      axis.title = element_text(size = 14, face = "italic"),
-      plot.title = element_text(hjust = 0.5, size = 14, face = "italic")
-    )
-  
-  p_n100[[gtype]] <- METRICS %>%
-    filter(scenario == "p_and_n", graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError"), n == "100", !is.na(val)) %>%
-    ggplot(aes(x = method, y = val, fill = method)) +
-    geom_boxplot(outlier.shape = NA) +
-    facet_grid(
-      rows = vars(metric), cols = vars(p_over_n), scales = "free_y",
-      labeller = labeller(
-        metric = metric_labeller,
-        p_over_n = as_labeller(c(`0.2` = "p/n == 0.2", `1.2` = "p/n == 1.2"), label_parsed)
-      )
-    ) +
-    scale_fill_manual(values = method_fill) +
-    theme_boxpaper() +
-    labs(x = NULL, y = NULL, title = expression(n == 100)) +
-    theme(
-      axis.text.x = element_blank(),
-      plot.title = element_text(hjust = 0.5, size = 14, face = "italic")
-    )
-  
-  combined_np <- (p_n50[[gtype]] + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) +
-    p_n100[[gtype]] +
-    plot_layout(guides = "collect") & theme(legend.position = "bottom")
-  
-  save_pdf(combined_np, paste0("supp_np_", gtype, ".pdf"), width = 14, height = 8)
-}
-
-combined_np_graph <- (p_n50[["star"]] + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) + 
-  p_n100[["star"]] + (p_n50[["band"]] + theme(strip.text.y = element_blank(), strip.background.y = element_blank(),
-                   strip.text.x = element_blank(), strip.background.x = element_blank())) + 
-  (p_n100[["band"]] + theme(strip.text.x = element_blank(), strip.background.x = element_blank())) + 
-  plot_layout(
-    guides = "collect",
-    design = c(
-      area(1, 1, 1, 1),
-      area(1, 2, 1, 2),
-      area(2, 1, 2, 1),
-      area(2, 2, 2, 2)
-    )
-  ) &
-  theme(legend.position = "bottom")
-
-combined_np_graph
-
-save_pdf(combined_np_graph, "supp_np_graphs.pdf", width = 14, height = 14)
-
-
-p_missing <- setNames(vector(mode = "list", length = 2L), nm = c("star", "band"))
-
-# missingness: star and band
-for (gtype in c("star", "band")) {
-  p_missing[[gtype]] <- METRICS %>%
-    filter(scenario == "missing", graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError")) %>%
-    ggplot(aes(x = pi_d, y = val, fill = method)) +
-    geom_boxplot(outlier.shape = NA) +
-    facet_grid(
-      rows = vars(metric), cols = vars(pi_po), scales = "free_y",
-      labeller = labeller(metric = metric_labeller, pi_po = missing_col_labeller)
-    ) +
-    scale_fill_manual(values = method_fill) +
-    theme_boxpaper() +
-    labs(x = expression(pi[w]), y = ifelse(gtype == "star", "Star graph structure", "Banded graph structure"))
-  
-  save_pdf(p_missing[[gtype]], paste0("supp_missing_", gtype, ".pdf"), width = 10, height = 9)
-}
-
-combined_missing_graph <- (p_missing[["star"]] + theme(axis.text.x = element_blank(), axis.title.x = element_blank())) +
-  (p_missing[["star"]] + theme(strip.text.x = element_blank(), strip.background.x = element_blank())) + 
-  plot_layout(
-    guides = "collect",
-    design = c(
-      area(1, 1, 1, 1),
-      area(2, 1, 2, 1)
-    )
-  ) &
-  theme(legend.position = "bottom")
-
-combined_missing_graph
-
-save_pdf(combined_missing_graph, "supp_missing_graphs.pdf", width = 10, height = 11.5)
-
-
-p_pev_g <- p_L_g <- setNames(vector(mode = "list", length = 2L), nm = c("star", "band"))
-
-# pev and L: star and band
-for (gtype in c("star", "band")) {
-  y_lab <- ifelse(gtype == "star", "Star graph structure", "Banded graph structure")
-  
-  p_pev_g[[gtype]] <- METRICS %>%
-    filter(scenario == "pev", graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError")) %>%
-    ggplot(aes(x = method, y = val, fill = method)) +
-    geom_boxplot(outlier.shape = NA) +
-    facet_grid(rows = vars(metric), cols = vars(pev), scales = "free_y",
-               labeller = labeller(metric = metric_labeller, pev = pev_col_labeller)) +
-    scale_fill_manual(values = method_fill) +
-    theme_boxpaper() +
-    labs(x = NULL, y = y_lab) +
-    theme(axis.text.x = element_blank())
-  
-  p_L_g[[gtype]] <- METRICS %>%
-    filter(scenario == "L", graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError")) %>%
-    ggplot(aes(x = method, y = val, fill = method)) +
-    geom_boxplot(outlier.shape = NA) +
-    facet_grid(rows = vars(metric), cols = vars(L), scales = "free_y",
-               labeller = labeller(metric = metric_labeller, L = L_col_labeller)) +
-    scale_fill_manual(values = method_fill) +
-    theme_boxpaper() +
-    labs(x = NULL, y = NULL) +
-    theme(axis.text.x = element_blank())
-  
-  combined_pevL_g <- (p_pev_g[[gtype]] + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) +
-    p_L_g[[gtype]] +
-    plot_layout(guides = "collect") & theme(legend.position = "bottom")
-  
-  save_pdf(combined_pevL_g, paste0("supp_pev_l_", gtype, ".pdf"), width = 14, height = 8)
-}
-
-combined_pevL_graph <- (p_pev_g[["star"]] + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) + 
-  p_L_g[["star"]] + (p_pev_g[["band"]] + theme(strip.text.y = element_blank(), strip.background.y = element_blank(),
-                                               strip.text.x = element_blank(), strip.background.x = element_blank(),
-                                               axis.text.x = element_blank(), axis.title.x = element_blank())) + 
-  (p_L_g[["band"]] + theme(strip.text.x = element_blank(), strip.background.x = element_blank(),
-                           axis.text.x = element_blank(), axis.title.x = element_blank())) + 
-  plot_layout(
-    guides = "collect",
-    design = c(
-      area(1, 1, 1, 1),
-      area(1, 2, 1, 2),
-      area(2, 1, 2, 1),
-      area(2, 2, 2, 2)
-    )
-  ) &
-  theme(legend.position = "bottom")
-
-save_pdf(combined_pevL_graph, "supp_pev_l_graphs.pdf", width = 14, height = 14)
-
-
-# sensitivity: star and band
-for (gtype in c("star", "band")) {
-  p_alpha_g <- METRICS %>%
-    filter(
-      scenario == "alpha", method == "poFGGM",
-      alpha %in% c("best", "10^0*mean", "10^2*mean", "10^4*mean", "10^6*mean"),
-      graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError")
-    ) %>%
-    plot_alpha_sensitivity(title = "(i)")
-  
-  p_gamma_g <- METRICS %>%
-    filter(scenario == "gamma", method == "poFGGM", graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError")) %>%
-    plot_gamma_sensitivity(title = "(ii)")
-  
-  p_d_g <- METRICS %>%
-    filter(scenario == "d", graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError")) %>%
-    ggplot(aes(x = method, y = val, fill = method)) +
-    geom_boxplot(outlier.shape = NA) +
-    facet_grid(rows = vars(metric), cols = vars(d), scales = "free_y", labeller = labeller(metric = metric_labeller)) +
-    scale_fill_manual(values = method_fill) +
-    theme_boxpaper() +
-    labs(x = NULL, y = NULL, title = "(iii)") +
-    theme(axis.text.x = element_blank(), plot.title = element_text(hjust = 0.5, size = 14, face = "italic"))
-  
-  p_part_sep_g <- METRICS %>%
-    filter(scenario == "part_sep", graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError")) %>%
-    ggplot(aes(x = method, y = val, fill = method)) +
-    geom_boxplot(outlier.shape = NA) +
-    facet_grid(rows = vars(metric), scales = "free_y", labeller = labeller(metric = metric_labeller)) +
-    scale_fill_manual(values = method_fill) +
-    theme_boxpaper() +
-    labs(x = NULL, y = NULL, title = "(iv)") +
-    theme(axis.text.x = element_blank(), plot.title = element_text(hjust = 0.5, size = 14, face = "italic"))
-  
-  combined_sens_g <- ((p_alpha_g + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) + p_gamma_g) +
-    ((p_d_g + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) +
-       p_part_sep_g +
-       plot_layout(guides = "collect", design = c(area(1, 1, 1, 2), area(1, 3, 1, 3))) &
-       theme(legend.position = "bottom")) +
-    plot_layout(
-      design = c(
-        area(1, 1, 1, 1),
-        area(1, 2, 1, 3),
-        area(2, 1, 2, 3)
-      )
-    ) +
-    plot_annotation(title = ifelse(gtype == "star", "Star graph structure", "Banded graph structure")) &
-    theme(plot.title = element_text(hjust = 0.5, face = "italic"))
-  
-  save_pdf(combined_sens_g, paste0("supp_sens_", gtype, ".pdf"), width = 14, height = 14)
-}
-
+# # ============================================================
+# # 7. Main-paper figures (small-world)
+# # ============================================================
+# 
+# # Missingness figure
+# missing_col_labeller <- as_labeller(c(
+#   `0.3` = "pi[po] == 0.3",
+#   `0.5` = "pi[po] == 0.5",
+#   `0.7` = "pi[po] == 0.7"
+# ), label_parsed)
+# 
+# p_missing_smallworld <- METRICS %>%
+#   filter(scenario == "missing", graph_type == "smallworld", metric %in% c("ThetaError", "AUC", "CurveError")) %>%
+#   ggplot(aes(x = pi_d, y = val, fill = method)) +
+#   geom_boxplot(outlier.shape = NA) +
+#   facet_grid(
+#     rows = vars(metric), cols = vars(pi_po), scales = "free_y",
+#     labeller = labeller(metric = metric_labeller, pi_po = missing_col_labeller)
+#   ) +
+#   scale_fill_manual(values = method_fill) +
+#   theme_boxpaper() +
+#   labs(x = expression(pi[w]), y = "")
+# 
+# METRICS %>%
+#   filter(scenario == "missing", graph_type == "smallworld", pi_po == "0.5", 
+#          metric %in% c("ThetaError", "AUC", "CurveError")) %>%
+#   ggplot(aes(x = pi_d, y = val, fill = method)) +
+#   geom_boxplot(outlier.shape = NA) +
+#   facet_grid(
+#     rows = vars(metric), scales = "free_y",
+#     labeller = labeller(metric = metric_labeller)
+#   ) +
+#   scale_fill_manual(values = method_fill) +
+#   theme_boxpaper() +
+#   labs(x = expression(pi[w]), y = "")
+# 
+# METRICS %>%
+#   filter(scenario == "missing", graph_type == "smallworld", pi_d == "0.5", metric %in% c("ThetaError", "AUC", "CurveError")) %>%
+#   ggplot(aes(x = pi_po, y = val, fill = method)) +
+#   geom_boxplot(outlier.shape = NA) +
+#   facet_grid(
+#     rows = vars(metric), scales = "free_y",
+#     labeller = labeller(metric = metric_labeller)
+#   ) +
+#   scale_fill_manual(values = method_fill) +
+#   theme_boxpaper() +
+#   labs(x = expression(pi[po]), y = "")
+# 
+# ggsave(file.path(FIGURES_DIR, "missing.pdf"), p_missing_smallworld,
+#        device = "pdf", width = 10, height = 9, units = "in", dpi = 300)
+# 
+# # PEV and L figure
+# pev_col_labeller <- as_labeller(c(
+#   `0.90` = "PEV == 0.90",
+#   `0.95` = "PEV == 0.95",
+#   `0.99` = "PEV == 0.99"
+# ), label_parsed)
+# 
+# L_col_labeller <- as_labeller(c(
+#   `5` = "L == 5",
+#   `9` = "L == 9"
+# ), label_parsed)
+# 
+# p_pev <- METRICS %>%
+#   filter(scenario == "pev", graph_type == "smallworld", metric %in% c("ThetaError", "AUC", "CurveError")) %>%
+#   ggplot(aes(x = method, y = val, fill = method)) +
+#   geom_boxplot(outlier.shape = NA) +
+#   facet_grid(
+#     rows = vars(metric), cols = vars(pev), scales = "free_y",
+#     labeller = labeller(metric = metric_labeller, pev = pev_col_labeller)
+#   ) +
+#   scale_fill_manual(values = method_fill) +
+#   theme_boxpaper() +
+#   labs(x = NULL, y = NULL) +
+#   theme(axis.text.x = element_blank())
+# 
+# p_L <- METRICS %>%
+#   filter(scenario == "L", graph_type == "smallworld", metric %in% c("ThetaError", "AUC", "CurveError")) %>%
+#   ggplot(aes(x = method, y = val, fill = method)) +
+#   geom_boxplot(outlier.shape = NA) +
+#   facet_grid(
+#     rows = vars(metric), cols = vars(L), scales = "free_y",
+#     labeller = labeller(metric = metric_labeller, L = L_col_labeller)
+#   ) +
+#   scale_fill_manual(values = method_fill) +
+#   theme_boxpaper() +
+#   labs(x = NULL, y = NULL) +
+#   theme(axis.text.x = element_blank())
+# 
+# combined_pev_L <- (p_pev + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) +
+#   p_L +
+#   plot_layout(widths = c(1.1, 1), guides = "collect") &
+#   theme(legend.position = "bottom")
+# 
+# ggsave(file.path(FIGURES_DIR, "pev_l.pdf"), combined_pev_L,
+#        device = "pdf", width = 12, height = 8, units = "in", dpi = 300)
+# 
+# # Sensitivity figure: small-world
+# p_alpha_sw <- METRICS %>%
+#   filter(
+#     scenario == "alpha", method == "poFGGM",
+#     alpha %in% c("best", "10^0*mean", "10^2*mean", "10^4*mean", "10^6*mean"),
+#     graph_type == "smallworld", metric %in% c("ThetaError", "AUC", "CurveError")
+#   ) %>%
+#   plot_alpha_sensitivity(title = "(i)")
+# 
+# p_gamma_sw <- METRICS %>%
+#   filter(scenario == "gamma", method == "poFGGM", graph_type == "smallworld", metric %in% c("ThetaError", "AUC", "CurveError")) %>%
+#   plot_gamma_sensitivity(title = "(ii)")
+# 
+# p_d_sw <- METRICS %>%
+#   filter(scenario == "d", graph_type == "smallworld", metric %in% c("ThetaError", "AUC", "CurveError")) %>%
+#   ggplot(aes(x = method, y = val, fill = method)) +
+#   geom_boxplot(outlier.shape = NA) +
+#   facet_grid(rows = vars(metric), cols = vars(d), scales = "free_y", labeller = labeller(metric = metric_labeller)) +
+#   scale_fill_manual(values = method_fill) +
+#   theme_boxpaper() +
+#   labs(x = NULL, y = NULL, title = "(iii)") +
+#   theme(axis.text.x = element_blank(), plot.title = element_text(hjust = 0.5, size = 14, face = "italic"))
+# 
+# p_part_sep_sw <- METRICS %>%
+#   filter(scenario == "part_sep", graph_type == "smallworld", metric %in% c("ThetaError", "AUC", "CurveError")) %>%
+#   ggplot(aes(x = method, y = val, fill = method)) +
+#   geom_boxplot(outlier.shape = NA) +
+#   facet_grid(rows = vars(metric), scales = "free_y", labeller = labeller(metric = metric_labeller)) +
+#   scale_fill_manual(values = method_fill) +
+#   theme_boxpaper() +
+#   labs(x = NULL, y = NULL, title = "(iv)") +
+#   theme(axis.text.x = element_blank(), plot.title = element_text(hjust = 0.5, size = 14, face = "italic"))
+# 
+# combined_sens_sw <- ((p_alpha_sw + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) + p_gamma_sw) +
+#   ((p_d_sw + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) +
+#      p_part_sep_sw +
+#      plot_layout(guides = "collect", design = c(patchwork::area(1, 1, 1, 2), patchwork::area(1, 3, 1, 3))) &
+#      theme(legend.position = "bottom")) +
+#   plot_layout(
+#     design = c(
+#       patchwork::area(1, 1, 1, 1),
+#       patchwork::area(1, 2, 1, 3),
+#       patchwork::area(2, 1, 2, 3)
+#     )
+#   )
+# 
+# ggsave(file.path(FIGURES_DIR, "sens_an.pdf"), combined_sens_sw,
+#        device = "pdf", width = 14, height = 14, units = "in", dpi = 300)
+# 
+# # ============================================================
+# # 8. Supplementary figures by graph type
+# # ============================================================
+# 
+# # Helper to save patchwork object
+# save_pdf <- function(plot_obj, filename, width, height) {
+#   ggsave(file.path(FIGURES_DIR, filename), plot_obj,
+#          device = "pdf", width = width, height = height,
+#          units = "in", dpi = 300, scale = .7)
+# }
+# 
+# p_n50 <- p_n100 <- setNames(vector(mode = "list", length = 2L), nm = c("star", "band"))
+# 
+# # p_and_n: star and band
+# for (gtype in c("star", "band")) {
+#   p_n50[[gtype]] <- METRICS %>%
+#     filter(scenario == "p_and_n", graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError"), n == "50") %>%
+#     ggplot(aes(x = method, y = val, fill = method)) +
+#     geom_boxplot(outlier.shape = NA) +
+#     facet_grid(
+#       rows = vars(metric), cols = vars(p_over_n), scales = "free_y",
+#       labeller = labeller(
+#         metric = metric_labeller,
+#         p_over_n = as_labeller(c(`0.2` = "p/n == 0.2", `1.2` = "p/n == 1.2"), label_parsed)
+#       )
+#     ) +
+#     scale_fill_manual(values = method_fill) +
+#     theme_boxpaper() +
+#     labs(x = NULL, y = ifelse(gtype == "star", "Star graph structure", "Banded graph structure"), title = expression(n == 50)) +
+#     theme(
+#       axis.text.x = element_blank(),
+#       axis.title = element_text(size = 14, face = "italic"),
+#       plot.title = element_text(hjust = 0.5, size = 14, face = "italic")
+#     )
+#   
+#   p_n100[[gtype]] <- METRICS %>%
+#     filter(scenario == "p_and_n", graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError"), n == "100", !is.na(val)) %>%
+#     ggplot(aes(x = method, y = val, fill = method)) +
+#     geom_boxplot(outlier.shape = NA) +
+#     facet_grid(
+#       rows = vars(metric), cols = vars(p_over_n), scales = "free_y",
+#       labeller = labeller(
+#         metric = metric_labeller,
+#         p_over_n = as_labeller(c(`0.2` = "p/n == 0.2", `1.2` = "p/n == 1.2"), label_parsed)
+#       )
+#     ) +
+#     scale_fill_manual(values = method_fill) +
+#     theme_boxpaper() +
+#     labs(x = NULL, y = NULL, title = expression(n == 100)) +
+#     theme(
+#       axis.text.x = element_blank(),
+#       plot.title = element_text(hjust = 0.5, size = 14, face = "italic")
+#     )
+#   
+#   combined_np <- (p_n50[[gtype]] + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) +
+#     p_n100[[gtype]] +
+#     plot_layout(guides = "collect") & theme(legend.position = "bottom")
+#   
+#   save_pdf(combined_np, paste0("supp_np_", gtype, ".pdf"), width = 14, height = 8)
+# }
+# 
+# combined_np_graph <- (p_n50[["star"]] + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) + 
+#   p_n100[["star"]] + (p_n50[["band"]] + theme(strip.text.y = element_blank(), strip.background.y = element_blank(),
+#                    strip.text.x = element_blank(), strip.background.x = element_blank())) + 
+#   (p_n100[["band"]] + theme(strip.text.x = element_blank(), strip.background.x = element_blank())) + 
+#   plot_layout(
+#     guides = "collect",
+#     design = c(
+#       patchwork::area(1, 1, 1, 1),
+#       patchwork::area(1, 2, 1, 2),
+#       patchwork::area(2, 1, 2, 1),
+#       patchwork::area(2, 2, 2, 2)
+#     )
+#   ) &
+#   theme(legend.position = "bottom")
+# 
+# combined_np_graph
+# 
+# save_pdf(combined_np_graph, "supp_np_graphs.pdf", width = 14, height = 14)
+# 
+# 
+# p_missing <- setNames(vector(mode = "list", length = 2L), nm = c("star", "band"))
+# 
+# # missingness: star and band
+# for (gtype in c("star", "band")) {
+#   p_missing[[gtype]] <- METRICS %>%
+#     filter(scenario == "missing", graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError")) %>%
+#     ggplot(aes(x = pi_d, y = val, fill = method)) +
+#     geom_boxplot(outlier.shape = NA) +
+#     facet_grid(
+#       rows = vars(metric), cols = vars(pi_po), scales = "free_y",
+#       labeller = labeller(metric = metric_labeller, pi_po = missing_col_labeller)
+#     ) +
+#     scale_fill_manual(values = method_fill) +
+#     theme_boxpaper() +
+#     labs(x = expression(pi[w]), y = ifelse(gtype == "star", "Star graph structure", "Banded graph structure"))
+#   
+#   save_pdf(p_missing[[gtype]], paste0("supp_missing_", gtype, ".pdf"), width = 10, height = 9)
+# }
+# 
+# combined_missing_graph <- (p_missing[["star"]] + theme(axis.text.x = element_blank(), axis.title.x = element_blank())) +
+#   (p_missing[["star"]] + theme(strip.text.x = element_blank(), strip.background.x = element_blank())) + 
+#   plot_layout(
+#     guides = "collect",
+#     design = c(
+#       patchwork::area(1, 1, 1, 1),
+#       patchwork::area(2, 1, 2, 1)
+#     )
+#   ) &
+#   theme(legend.position = "bottom")
+# 
+# combined_missing_graph
+# 
+# save_pdf(combined_missing_graph, "supp_missing_graphs.pdf", width = 10, height = 11.5)
+# 
+# 
+# p_pev_g <- p_L_g <- setNames(vector(mode = "list", length = 2L), nm = c("star", "band"))
+# 
+# # pev and L: star and band
+# for (gtype in c("star", "band")) {
+#   y_lab <- ifelse(gtype == "star", "Star graph structure", "Banded graph structure")
+#   
+#   p_pev_g[[gtype]] <- METRICS %>%
+#     filter(scenario == "pev", graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError")) %>%
+#     ggplot(aes(x = method, y = val, fill = method)) +
+#     geom_boxplot(outlier.shape = NA) +
+#     facet_grid(rows = vars(metric), cols = vars(pev), scales = "free_y",
+#                labeller = labeller(metric = metric_labeller, pev = pev_col_labeller)) +
+#     scale_fill_manual(values = method_fill) +
+#     theme_boxpaper() +
+#     labs(x = NULL, y = y_lab) +
+#     theme(axis.text.x = element_blank())
+#   
+#   p_L_g[[gtype]] <- METRICS %>%
+#     filter(scenario == "L", graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError")) %>%
+#     ggplot(aes(x = method, y = val, fill = method)) +
+#     geom_boxplot(outlier.shape = NA) +
+#     facet_grid(rows = vars(metric), cols = vars(L), scales = "free_y",
+#                labeller = labeller(metric = metric_labeller, L = L_col_labeller)) +
+#     scale_fill_manual(values = method_fill) +
+#     theme_boxpaper() +
+#     labs(x = NULL, y = NULL) +
+#     theme(axis.text.x = element_blank())
+#   
+#   combined_pevL_g <- (p_pev_g[[gtype]] + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) +
+#     p_L_g[[gtype]] +
+#     plot_layout(guides = "collect") & theme(legend.position = "bottom")
+#   
+#   save_pdf(combined_pevL_g, paste0("supp_pev_l_", gtype, ".pdf"), width = 14, height = 8)
+# }
+# 
+# combined_pevL_graph <- (p_pev_g[["star"]] + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) + 
+#   p_L_g[["star"]] + (p_pev_g[["band"]] + theme(strip.text.y = element_blank(), strip.background.y = element_blank(),
+#                                                strip.text.x = element_blank(), strip.background.x = element_blank(),
+#                                                axis.text.x = element_blank(), axis.title.x = element_blank())) + 
+#   (p_L_g[["band"]] + theme(strip.text.x = element_blank(), strip.background.x = element_blank(),
+#                            axis.text.x = element_blank(), axis.title.x = element_blank())) + 
+#   plot_layout(
+#     guides = "collect",
+#     design = c(
+#       patchwork::area(1, 1, 1, 1),
+#       patchwork::area(1, 2, 1, 2),
+#       patchwork::area(2, 1, 2, 1),
+#       patchwork::area(2, 2, 2, 2)
+#     )
+#   ) &
+#   theme(legend.position = "bottom")
+# 
+# save_pdf(combined_pevL_graph, "supp_pev_l_graphs.pdf", width = 14, height = 14)
+# 
+# 
+# # sensitivity: star and band
+# for (gtype in c("star", "band")) {
+#   p_alpha_g <- METRICS %>%
+#     filter(
+#       scenario == "alpha", method == "poFGGM",
+#       alpha %in% c("best", "10^0*mean", "10^2*mean", "10^4*mean", "10^6*mean"),
+#       graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError")
+#     ) %>%
+#     plot_alpha_sensitivity(title = "(i)")
+#   
+#   p_gamma_g <- METRICS %>%
+#     filter(scenario == "gamma", method == "poFGGM", graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError")) %>%
+#     plot_gamma_sensitivity(title = "(ii)")
+#   
+#   p_d_g <- METRICS %>%
+#     filter(scenario == "d", graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError")) %>%
+#     ggplot(aes(x = method, y = val, fill = method)) +
+#     geom_boxplot(outlier.shape = NA) +
+#     facet_grid(rows = vars(metric), cols = vars(d), scales = "free_y", labeller = labeller(metric = metric_labeller)) +
+#     scale_fill_manual(values = method_fill) +
+#     theme_boxpaper() +
+#     labs(x = NULL, y = NULL, title = "(iii)") +
+#     theme(axis.text.x = element_blank(), plot.title = element_text(hjust = 0.5, size = 14, face = "italic"))
+#   
+#   p_part_sep_g <- METRICS %>%
+#     filter(scenario == "part_sep", graph_type == gtype, metric %in% c("ThetaError", "AUC", "CurveError")) %>%
+#     ggplot(aes(x = method, y = val, fill = method)) +
+#     geom_boxplot(outlier.shape = NA) +
+#     facet_grid(rows = vars(metric), scales = "free_y", labeller = labeller(metric = metric_labeller)) +
+#     scale_fill_manual(values = method_fill) +
+#     theme_boxpaper() +
+#     labs(x = NULL, y = NULL, title = "(iv)") +
+#     theme(axis.text.x = element_blank(), plot.title = element_text(hjust = 0.5, size = 14, face = "italic"))
+#   
+#   combined_sens_g <- ((p_alpha_g + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) + p_gamma_g) +
+#     ((p_d_g + theme(strip.text.y = element_blank(), strip.background.y = element_blank())) +
+#        p_part_sep_g +
+#        plot_layout(guides = "collect", design = c(patchwork::area(1, 1, 1, 2), patchwork::area(1, 3, 1, 3))) &
+#        theme(legend.position = "bottom")) +
+#     plot_layout(
+#       design = c(
+#         patchwork::area(1, 1, 1, 1),
+#         patchwork::area(1, 2, 1, 3),
+#         patchwork::area(2, 1, 2, 3)
+#       )
+#     ) +
+#     plot_annotation(title = ifelse(gtype == "star", "Star graph structure", "Banded graph structure")) &
+#     theme(plot.title = element_text(hjust = 0.5, face = "italic"))
+#   
+#   save_pdf(combined_sens_g, paste0("supp_sens_", gtype, ".pdf"), width = 14, height = 14)
+# }
+# 
 # ============================================================
 # 9. Console summaries
 # ============================================================
