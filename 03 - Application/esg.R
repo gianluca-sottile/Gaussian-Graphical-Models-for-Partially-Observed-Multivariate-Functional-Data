@@ -32,6 +32,7 @@ suppressPackageStartupMessages({
   library(ggraph)
   library(BDgraph)
   library(grid)
+  library(metR)
 })
 
 set.seed(123)
@@ -152,6 +153,7 @@ log1p_vars <- c(
 
 # Selected indicator display names used in figures
 short_names <- c(
+  "EN.ATM.PM25.MC.M3"    = "PM2.5 exposure",
   "EN.GHG.CO2.MT.CE.AR5" = "CO2 total",
   "EN.GHG.CO2.PC.CE.AR5" = "CO2 pc",
   "EN.GHG.CH4.MT.CE.AR5" = "CH4 total",
@@ -194,6 +196,7 @@ indicator_names_missing <- c(
 
 # Graph coloring
 node_pillar <- c(
+  "EN.ATM.PM25.MC.M3"    = "Environment",
   "EN.GHG.CO2.MT.CE.AR5" = "Environment",
   "EN.GHG.CO2.PC.CE.AR5" = "Environment",
   "EN.GHG.CH4.MT.CE.AR5" = "Environment",
@@ -218,6 +221,7 @@ node_pillar <- c(
 )
 
 node_group <- c(
+  "EN.ATM.PM25.MC.M3"    = "Emissions & pollution",
   "EN.GHG.CO2.MT.CE.AR5" = "Emissions & pollution",
   "EN.GHG.CO2.PC.CE.AR5" = "Emissions & pollution",
   "EN.GHG.CH4.MT.CE.AR5" = "Emissions & pollution",
@@ -615,116 +619,265 @@ Phi_emp <- basis_fit$Phi_emp
 XiEst <- integrate_cube(esg_array_filter, Phi_emp, tp[tp_filter])
 
 # ============================================================
-# 9. Fit penalized path
+# 9. Fit penalized path and 10. Refit and model selection
 # ============================================================
 
 id_pobs <- which(apply(apply(is.na(esg_array_filter), 3, colSums) > 0, 1, any))
 id_obs <- setdiff(seq_len(dim(esg_array_filter)[2]), id_pobs)
 
-fit0 <- pofggm(
-  id_pobs = id_pobs,
-  id_obs = id_obs,
-  X = esg_array_filter,
-  Phi = Phi_emp,
-  tp = tp[tp_filter],
-  Sgm.hat = NULL,
-  Tht.hat = NULL,
-  wTht = NULL,
-  maxit.admm = 1e5,
-  rho = .Machine$double.xmax,
-  gamma = 0.0,
-  alpha = rep(0.0, length(id_pobs)),
-  ncores = 4L,
-  verbose = TRUE,
-  thr.em = 1e-5,
-  thr.admm = 1e-6
-)
+# fit0 <- pofggm(
+#   id_pobs = id_pobs,
+#   id_obs = id_obs,
+#   X = esg_array_filter,
+#   Phi = Phi_emp,
+#   tp = tp[tp_filter],
+#   Sgm.hat = NULL,
+#   Tht.hat = NULL,
+#   wTht = NULL,
+#   maxit.admm = 1e5,
+#   rho = .Machine$double.xmax,
+#   gamma = 0.0,
+#   alpha = rep(0.0, length(id_pobs)),
+#   ncores = 4L,
+#   verbose = TRUE,
+#   thr.em = 1e-5,
+#   thr.admm = 1e-6
+# )
+# 
+# gamma1.vec <- fit0$rho.max * exp(seq(log(1), log(0.01), length.out = 21))
+# 
+# fitList <- vector("list", length = length(gamma1.vec))
+# for (i in seq_along(gamma1.vec)) {
+#   fitList[[i]] <- pofggm(
+#     id_pobs = id_pobs,
+#     id_obs = id_obs,
+#     X = esg_array_filter,
+#     Phi = Phi_emp,
+#     tp = tp[tp_filter],
+#     Sgm.hat = NULL,
+#     Tht.hat = NULL,
+#     wTht = NULL,
+#     maxit.admm = 1e5,
+#     rho = gamma1.vec[i],
+#     gamma = 0.0,
+#     alpha = fit0$alpha_opt,
+#     verbose = TRUE,
+#     thr.em = 1e-5,
+#     thr.admm = 1e-6
+#   )
+# }
+# 
+# saveRDS(list(fit0 = fit0, gamma1.vec = gamma1.vec, fitList = fitList),
+#         file.path(DERIVED_DIR, "fit_path.rds"))
 
-gamma1.vec <- fit0$rho.max * exp(seq(log(1), log(0.01), length.out = 21))
-
-fitList <- vector("list", length = length(gamma1.vec))
-for (i in seq_along(gamma1.vec)) {
-  fitList[[i]] <- pofggm(
-    id_pobs = id_pobs,
-    id_obs = id_obs,
-    X = esg_array_filter,
-    Phi = Phi_emp,
-    tp = tp[tp_filter],
-    Sgm.hat = NULL,
-    Tht.hat = NULL,
-    wTht = NULL,
-    maxit.admm = 1e5,
-    rho = gamma1.vec[i],
-    gamma = 0.0,
-    alpha = fit0$alpha_opt,
-    verbose = TRUE,
-    thr.em = 1e-5,
-    thr.admm = 1e-6
+fit_pofggm <- vector(mode = "list", length = 5L)
+fit_pofggm_mle <- vector(mode = "list", length = 5L)
+df_ic <- vector(mode = "list", length = 5L)
+perc.gamma1 <- exp(seq(log(1), log(0.01), length.out = 21))
+count <- 0
+for(gamma2 in c(0, .25, .5, .75, 1)) {
+  count <- count + 1L
+  
+  fit_pofggm[[count]] <- try(
+    fit_pofggm_path(
+      X = esg_array_filter,
+      Phi_emp = Phi_emp,
+      tp = tp[tp_filter],
+      id_pobs = id_pobs,
+      id_obs = id_obs,
+      perc_rho = perc.gamma1,
+      gamma = gamma2,
+      alpha = 0.0,
+      ncores = 4L,
+      verbose = TRUE,
+      maxit_admm = 1e5,
+      thr_em = 1e-5,
+      thr_admm = 1e-6
+    ),
+    silent = TRUE
   )
+  
+  fitList <- fit_pofggm[[count]]$fit_list
+  out.pfggm.rho.mle <- vector("list", length = length(fitList))
+  for (kk in seq_along(fitList)) {
+    print(kk)
+    out.pfggm.rho <- fitList[[kk]]
+    out.pfggm.rho.mle[[kk]] <- pofggm(
+      id_pobs = id_pobs,
+      id_obs = id_obs,
+      X = esg_array_filter,
+      Phi = Phi_emp,
+      tp = tp[tp_filter],
+      Sgm.hat = out.pfggm.rho$Sgm.hat,
+      Tht.hat = out.pfggm.rho$Tht.hat,
+      wTht = (out.pfggm.rho$Tht.hat == 0) * .Machine$double.xmax,
+      gamma = gamma2,
+      alpha = out.pfggm.rho$alpha_opt,
+      rho = 1e-12,
+      ncores = 4L,
+      verbose = TRUE
+    )
+  }
+  fit_pofggm_mle[[count]] <- out.pfggm.rho.mle
+  
+  idx <- seq_along(fitList)
+  gamma_ebic <- 0.5
+  
+  aic_vector <- vapply(idx, function(i) compute_aic(n_countries, S = fitList[[i]]$S, Theta = fitList[[i]]$Tht.hat), numeric(1))
+  aic_vector.mle <- vapply(idx, function(i) compute_aic(n_countries, S = out.pfggm.rho.mle[[i]]$S, Theta = out.pfggm.rho.mle[[i]]$Tht.hat), numeric(1))
+  
+  bic_vector <- vapply(idx, function(i) compute_bic(n_countries, S = fitList[[i]]$S, Theta = fitList[[i]]$Tht.hat), numeric(1))
+  bic_vector.mle <- vapply(idx, function(i) compute_bic(n_countries, S = out.pfggm.rho.mle[[i]]$S, Theta = out.pfggm.rho.mle[[i]]$Tht.hat), numeric(1))
+  
+  ebic_vector <- vapply(idx, function(i) compute_ebic(gamma_ebic, n_countries, S = fitList[[i]]$S, Theta = fitList[[i]]$Tht.hat), numeric(1))
+  ebic_vector.mle <- vapply(idx, function(i) compute_ebic(gamma_ebic, n_countries, S = out.pfggm.rho.mle[[i]]$S, Theta = out.pfggm.rho.mle[[i]]$Tht.hat), numeric(1))
+  
+  df_ic[[count]] <- data.frame(
+    gamma1 = fit_pofggm[[count]]$grid_rho,
+    AIC = aic_vector,
+    AIC_MLE = aic_vector.mle,
+    BIC = bic_vector,
+    BIC_MLE = bic_vector.mle,
+    eBIC = ebic_vector,
+    eBIC_MLE = ebic_vector.mle
+  )
+  
+  id.opt <- which.min(ebic_vector.mle)
+  selected_fit <- out.pfggm.rho.mle[[id.opt]]
+  
+  gamma1_min <- df_ic[[count]]$gamma1[id.opt]
+  
+  ggplot(df_ic[[count]], aes(x = gamma1, y = eBIC_MLE)) +
+    geom_line(linewidth = 0.8, color = "gray") +
+    geom_point(size = 2, color = "gray") +
+    geom_vline(xintercept = gamma1_min, linetype = "dashed", color = "gray20", linewidth = 1) +
+    labs(x = expression(gamma[1]), y = "eBIC") +
+    theme_bw(base_size = 12) +
+    theme(
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_blank(),
+      axis.title = element_text(face = "bold"),
+      axis.text = element_text(color = "black")
+    )
+  
+  save.image("~/Downloads/JCGS_APP.RData")
 }
 
-saveRDS(list(fit0 = fit0, gamma1.vec = gamma1.vec, fitList = fitList),
+df_ic_full <- do.call("rbind", df_ic) |> 
+  dplyr::mutate(gamma2 = rep(c(0, .25, .5, .75, 1), each = length(perc.gamma1)))
+id_opt <- which.min(df_ic_full$eBIC_MLE)
+min_point <- df_ic_full[id_opt, ]
+
+saveRDS(list(fit = fit_pofggm, fitMLE = fit_pofggm_mle, percGamma1 = perc.gamma1, 
+             dfList = df_ic, dfFULL = df_ic_full),
         file.path(DERIVED_DIR, "fit_path.rds"))
+
+p_ebic <- ggplot(df_ic_full, aes(x = gamma1, y = gamma2, z = eBIC_MLE)) +
+  # geom_contour_filled(bins = 700) +
+  geom_contour(bins = 700, colour = "gray70") +
+  geom_point(
+    data = min_point,
+    aes(x = gamma1, y = gamma2),
+    color = "black",
+    shape = 17,
+    size = 4
+  ) +
+  geom_text_contour(
+    bins = 10,
+    stroke = 0.15,
+    size = 3,
+    label.placer = label_placer_n(2),
+    check_overlap = TRUE
+  ) +
+  geom_text(
+    data = min_point,
+    aes(x = gamma1, y = gamma2, label = paste0("min = ", round(eBIC_MLE, 3))),
+    color = "black",
+    hjust = -0.1,
+    vjust = +1.5
+  ) +
+  labs(x = expression(gamma[1]), y = expression(gamma[2]), title = "") +
+  theme_bw() + 
+  theme(legend.position = "none", 
+        axis.title = element_text(size = 13),
+        axis.text = element_text(size = 12))
+p_ebic
+
+ggsave(
+  filename = file.path(FIGURES_DIR, "ebic_network.pdf"),
+  plot = p_ebic,
+  width = 10,
+  height = 8.5,
+  device = "pdf"
+)
+
+selected_models_id <- which.min(sapply(df_ic, \(z) min(z$eBIC_MLE)))
+selected_fit_it <- sapply(df_ic, \(z) which.min(z$eBIC_MLE))[selected_models_id]
+
+selected_fit <- fit_pofggm_mle[[selected_models_id]][[selected_fit_it]] #[[selected_fit_it[[2]]]]
+
+saveRDS(selected_fit, file.path(DERIVED_DIR, "selected_model.rds"))
 
 # ============================================================
 # 10. Refit and model selection
 # ============================================================
 
-out.pfggm.rho.mle <- vector("list", length = length(fitList))
-for (kk in seq_along(fitList)) {
-  out.pfggm.rho <- fitList[[kk]]
-  out.pfggm.rho.mle[[kk]] <- pofggm(
-    id_pobs = id_pobs,
-    id_obs = id_obs,
-    X = esg_array_filter,
-    Phi = Phi_emp,
-    tp = tp[tp_filter],
-    Sgm.hat = out.pfggm.rho$Sgm.hat,
-    Tht.hat = out.pfggm.rho$Tht.hat,
-    wTht = (out.pfggm.rho$Tht.hat == 0) * .Machine$double.xmax,
-    alpha = out.pfggm.rho$alpha_opt,
-    rho = 1e-12,
-    ncores = 4L,
-    verbose = TRUE
-  )
-}
-
-idx <- seq_along(fitList)
-gamma_ebic <- 0.5
-n_countries <- dim(esg_array_filter)[2]
-
-aic_vector <- vapply(idx, function(i) compute_aic(n_countries, S = fitList[[i]]$S, Theta = fitList[[i]]$Tht.hat), numeric(1))
-aic_vector.mle <- vapply(idx, function(i) compute_aic(n_countries, S = out.pfggm.rho.mle[[i]]$S, Theta = out.pfggm.rho.mle[[i]]$Tht.hat), numeric(1))
-
-bic_vector <- vapply(idx, function(i) compute_bic(n_countries, S = fitList[[i]]$S, Theta = fitList[[i]]$Tht.hat), numeric(1))
-bic_vector.mle <- vapply(idx, function(i) compute_bic(n_countries, S = out.pfggm.rho.mle[[i]]$S, Theta = out.pfggm.rho.mle[[i]]$Tht.hat), numeric(1))
-
-ebic_vector <- vapply(idx, function(i) compute_ebic(gamma_ebic, n_countries, S = fitList[[i]]$S, Theta = fitList[[i]]$Tht.hat), numeric(1))
-ebic_vector.mle <- vapply(idx, function(i) compute_ebic(gamma_ebic, n_countries, S = out.pfggm.rho.mle[[i]]$S, Theta = out.pfggm.rho.mle[[i]]$Tht.hat), numeric(1))
-
-df_ic <- data.frame(
-  gamma1 = gamma1.vec,
-  AIC = aic_vector,
-  AIC_MLE = aic_vector.mle,
-  BIC = bic_vector,
-  BIC_MLE = bic_vector.mle,
-  eBIC = ebic_vector,
-  eBIC_MLE = ebic_vector.mle
-)
-
-saveRDS(list(refit = out.pfggm.rho.mle, ic_table = df_ic), file.path(DERIVED_DIR, "fit_refit.rds"))
-
-id.opt <- which.min(ebic_vector.mle)
-selected_fit <- out.pfggm.rho.mle[[id.opt]]
-saveRDS(selected_fit, file.path(DERIVED_DIR, "selected_model.rds"))
+# out.pfggm.rho.mle <- vector("list", length = length(fitList))
+# for (kk in seq_along(fitList)) {
+#   out.pfggm.rho <- fitList[[kk]]
+#   out.pfggm.rho.mle[[kk]] <- pofggm(
+#     id_pobs = id_pobs,
+#     id_obs = id_obs,
+#     X = esg_array_filter,
+#     Phi = Phi_emp,
+#     tp = tp[tp_filter],
+#     Sgm.hat = out.pfggm.rho$Sgm.hat,
+#     Tht.hat = out.pfggm.rho$Tht.hat,
+#     wTht = (out.pfggm.rho$Tht.hat == 0) * .Machine$double.xmax,
+#     alpha = out.pfggm.rho$alpha_opt,
+#     rho = 1e-12,
+#     ncores = 4L,
+#     verbose = TRUE
+#   )
+# }
+# 
+# idx <- seq_along(fitList)
+# gamma_ebic <- 0.5
+# n_countries <- dim(esg_array_filter)[2]
+# 
+# aic_vector <- vapply(idx, function(i) compute_aic(n_countries, S = fitList[[i]]$S, Theta = fitList[[i]]$Tht.hat), numeric(1))
+# aic_vector.mle <- vapply(idx, function(i) compute_aic(n_countries, S = out.pfggm.rho.mle[[i]]$S, Theta = out.pfggm.rho.mle[[i]]$Tht.hat), numeric(1))
+# 
+# bic_vector <- vapply(idx, function(i) compute_bic(n_countries, S = fitList[[i]]$S, Theta = fitList[[i]]$Tht.hat), numeric(1))
+# bic_vector.mle <- vapply(idx, function(i) compute_bic(n_countries, S = out.pfggm.rho.mle[[i]]$S, Theta = out.pfggm.rho.mle[[i]]$Tht.hat), numeric(1))
+# 
+# ebic_vector <- vapply(idx, function(i) compute_ebic(gamma_ebic, n_countries, S = fitList[[i]]$S, Theta = fitList[[i]]$Tht.hat), numeric(1))
+# ebic_vector.mle <- vapply(idx, function(i) compute_ebic(gamma_ebic, n_countries, S = out.pfggm.rho.mle[[i]]$S, Theta = out.pfggm.rho.mle[[i]]$Tht.hat), numeric(1))
+# 
+# df_ic <- data.frame(
+#   gamma1 = gamma1.vec,
+#   AIC = aic_vector,
+#   AIC_MLE = aic_vector.mle,
+#   BIC = bic_vector,
+#   BIC_MLE = bic_vector.mle,
+#   eBIC = ebic_vector,
+#   eBIC_MLE = ebic_vector.mle
+# )
+# 
+# saveRDS(list(refit = out.pfggm.rho.mle, ic_table = df_ic), file.path(DERIVED_DIR, "fit_refit.rds"))
+# 
+# id.opt <- which.min(ebic_vector.mle)
+# selected_fit <- out.pfggm.rho.mle[[id.opt]]
+# saveRDS(selected_fit, file.path(DERIVED_DIR, "selected_model.rds"))
 
 # ============================================================
 # 11. eBIC plot and network figure
 # ============================================================
 
-gamma1_min <- gamma1.vec[id.opt]
+gamma1_min <- df_ic[[selected_models_id]][selected_fit_it, "gamma1"]
+gamma2_min <- c(0, .25, .5, .75, 1)[selected_models_id]
 
-p_ebic <- ggplot(df_ic, aes(x = gamma1, y = eBIC_MLE)) +
+ggplot(df_ic[[selected_models_id]], aes(x = gamma1, y = eBIC_MLE)) +
   geom_line(linewidth = 0.8, color = "gray") +
   geom_point(size = 2, color = "gray") +
   geom_vline(xintercept = gamma1_min, linetype = "dashed", color = "gray20", linewidth = 1) +
@@ -744,6 +897,41 @@ graph <- BDgraph::get_graph(THT.graph, cut = 0.5)
 graph_ig <- graph_from_adjacency_matrix(graph, mode = "undirected", diag = FALSE)
 g2 <- delete_vertices(graph_ig, V(graph_ig)[degree(graph_ig) == 0])
 
+# coordinate manuali: x, y
+coords <- rbind(
+  "EN.ATM.PM25.MC.M3"    = c(-1.8, -1.2),
+  "EN.GHG.CO2.MT.CE.AR5" = c(-0.8,  0.8),
+  "EN.GHG.CO2.PC.CE.AR5" = c( 0.0,  0.8),
+  "EN.GHG.CH4.MT.CE.AR5" = c(-0.8,  1.5),
+  "EN.GHG.N2O.MT.CE.AR5" = c(-0.2,  1.5),
+  "EN.GHG.ALL.MT.CE.AR5" = c(-0.5,  2.1),
+  "EN.GHG.ALL.PC.CE.AR5" = c( 0.6,  1.5),
+  "EG.USE.PCAP.KG.OE"    = c( 0.4,  0.1),
+  "EG.FEC.RNEW.ZS"       = c( 1.1,  0.8),
+  "EN.CLC.CDDY.XD"       = c( 2.2,  1.2),
+  "EN.CLC.HDDY.XD"       = c( 2.2,  0.3),
+  "ER.H2O.FWST.ZS"       = c( 3.0, -0.2),
+  "ER.H2O.FWTL.ZS"       = c( 3.8, -0.2),
+  "AG.LND.AGRI.ZS"       = c( 2.0, -1.6),
+  "AG.LND.FRST.ZS"       = c( 2.8, -1.6),
+  "NV.AGR.TOTL.ZS"       = c( 1.2, -0.8),
+  "SP.DYN.TFRT.IN"       = c( 0.0, -1.5),
+  "SP.DYN.LE00.IN"       = c( 0.8, -1.5),
+  "SP.POP.65UP.TO.ZS"    = c( 0.8, -2.2),
+  "SH.DYN.MORT"          = c(-0.8, -2.2),
+  "SH.STA.OWAD.ZS"       = c( 0.0, -2.9)
+)
+
+# tieni solo quelli presenti nel grafo
+lay <- coords[V(g2)$name, , drop = FALSE]
+
+nodes_df <- tibble(
+  name = rownames(coords),
+  x = coords[, 1],
+  y = coords[, 2],
+  label = short_names[rownames(coords)]
+)
+
 V(g2)$label <- short_names[V(g2)$name]
 V(g2)$pillar <- node_pillar[V(g2)$name]
 V(g2)$group <- node_group[V(g2)$name]
@@ -751,6 +939,7 @@ V(g2)$deg <- degree(g2)
 
 g_tbl <- as_tbl_graph(g2) %>%
   activate(nodes) %>%
+  left_join(nodes_df, by = "name") %>%
   mutate(
     label = short_names[name],
     pillar = factor(node_pillar[name], levels = c("Environment", "Social", "Governance")),
@@ -766,7 +955,7 @@ g_tbl <- as_tbl_graph(g2) %>%
     deg = centrality_degree()
   )
 
-p_net <- ggraph(g_tbl, layout = "kk") +
+p_net <- ggraph(g_tbl, layout = "manual", x = x, y = y) +
   geom_edge_link(color = "gray70", width = 0.8) +
   geom_node_point(
     aes(size = deg, fill = group, color = pillar),
@@ -775,10 +964,10 @@ p_net <- ggraph(g_tbl, layout = "kk") +
   geom_node_text(
     aes(label = label),
     repel = TRUE,
-    size = 4,
+    size = 5,
     force = 3,
     box.padding = 0.6,
-    point.padding = 0.4,
+    point.padding = 0.5,
     max.overlaps = Inf
   ) +
   scale_size(range = c(4, 10), guide = "none") +
@@ -800,30 +989,31 @@ p_net <- ggraph(g_tbl, layout = "kk") +
     legend.text = element_text(size = 11),
     legend.title = element_text(size = 12)
   )
+p_net
 
 ggsave(
   filename = file.path(FIGURES_DIR, "esg_network.pdf"),
   plot = p_net,
-  width = 11,
+  width = 14,
   height = 8.5,
   device = "pdf"
 )
 
-combined_network <- p_ebic + p_net + plot_layout(
-  guides = "collect",
-  design = c(
-    patchwork::area(1, 1, 1, 1),
-    patchwork::area(1, 2, 1, 3)
-  )
-)
-
-ggsave(
-  filename = file.path(FIGURES_DIR, "ebic_esg_network.pdf"),
-  plot = combined_network,
-  width = 14,
-  height = 6,
-  device = "pdf"
-)
+# combined_network <- p_ebic + p_net + plot_layout(
+#   guides = "collect",
+#   design = c(
+#     patchwork::area(1, 1, 1, 1),
+#     patchwork::area(1, 2, 1, 3)
+#   )
+# )
+# 
+# ggsave(
+#   filename = file.path(FIGURES_DIR, "ebic_esg_network.pdf"),
+#   plot = combined_network,
+#   width = 14,
+#   height = 6,
+#   device = "pdf"
+# )
 
 # ============================================================
 # 12. Cross-covariance surfaces
@@ -901,7 +1091,7 @@ make_crosscov_plot <- function(Sigma_mat, midpoint, xlab, ylab) {
 
 p4 <- make_crosscov_plot(
   Sigma_mat = SIGMA_3_26,
-  midpoint = min(SIGMA_3_26),
+  midpoint = max(SIGMA_3_26),
   xlab = expression(CO[2] ~ emissions ~ per ~ capita),
   ylab = "Life expectancy at birth"
 )
@@ -920,24 +1110,55 @@ p6 <- make_crosscov_plot(
   ylab = "Agriculture, forestry and fishing value added"
 )
 
-combined_crosscov <- p4 + p5 + p6 + plot_layout(
-  design = c(
-    patchwork::area(1, 1, 1, 1),
-    patchwork::area(1, 2, 1, 2),
-    patchwork::area(1, 3, 1, 3)
-  )
-)
-
 ggsave(
-  filename = file.path(FIGURES_DIR, "cross_cov.pdf"),
-  plot = combined_crosscov,
-  width = 25,
+  filename = file.path(FIGURES_DIR, "cross_cov_p4.pdf"),
+  plot = p4,
+  width = 10,
   height = 10,
   device = "pdf",
   scale = 0.6,
   dpi = 300,
   units = "in"
 )
+ggsave(
+  filename = file.path(FIGURES_DIR, "cross_cov_p5.pdf"),
+  plot = p5,
+  width = 10,
+  height = 10,
+  device = "pdf",
+  scale = 0.6,
+  dpi = 300,
+  units = "in"
+)
+ggsave(
+  filename = file.path(FIGURES_DIR, "cross_cov_p6.pdf"),
+  plot = p6,
+  width = 10,
+  height = 10,
+  device = "pdf",
+  scale = 0.6,
+  dpi = 300,
+  units = "in"
+)
+
+# combined_crosscov <- p4 + p5 + p6 + plot_layout(
+#   design = c(
+#     patchwork::area(1, 1, 1, 1),
+#     patchwork::area(1, 2, 1, 2),
+#     patchwork::area(1, 3, 1, 3)
+#   )
+# )
+# 
+# ggsave(
+#   filename = file.path(FIGURES_DIR, "cross_cov.pdf"),
+#   plot = combined_crosscov,
+#   width = 25,
+#   height = 10,
+#   device = "pdf",
+#   scale = 0.6,
+#   dpi = 300,
+#   units = "in"
+# )
 
 # ============================================================
 # 13. Example raw and reconstructed curves
