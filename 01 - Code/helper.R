@@ -93,7 +93,6 @@ quadWeights <- function(argvals, method = c("trapezoidal", "midpoint")) {
   return(weights)
 }
 
-
 # ---------------------------
 # 4. Univariate FPCA from covariance surface
 # ---------------------------
@@ -184,7 +183,6 @@ uFPCA <- function(G, argvals, pev = NULL, efunctions_sign = NULL) {
   return(out)
 }
 
-
 # ---------------------------
 # 5. Mean and covariance estimation with missing values
 #    (Kraus-style empirical estimators)
@@ -221,7 +219,6 @@ covKraus <- function(X_mat) {
   
   return(cov_mat)
 }
-
 
 # ---------------------------
 # 6. Curve reconstruction using Kraus-type approach
@@ -350,7 +347,6 @@ krauss_gia <- function(X_mat, alpha = NULL, Sgm = NULL) {
     id_pobs = reconst_fcts
   ))
 }
-
 
 # ---------------------------
 # 7. Graph recovery metrics
@@ -938,12 +934,9 @@ run_theta_path <- function(S,
   theta_path <- vector("list", length = nrho)
   current_Tht <- Tht_init
   
-  for (r in seq_len(nrho)) {
-    if (verbose) {
-      cat("\nRho iteration:", r, "of", nrho, "\n")
-    }
-    
-    fit <- try(
+  fit <- lapply(seq_len(nrho), \(r) {
+    if (verbose) cat("\nRho iteration:", r, "of", nrho, "\n")
+    try(
       admm_tht_sub(
         p = p,
         N = K_hat,
@@ -959,23 +952,49 @@ run_theta_path <- function(S,
         trace = trace
       ),
       silent = TRUE
-    )
-    
-    if (inherits(fit, "try-error")) {
-      return(list(
-        ok = FALSE,
-        grid_rho = grid_rho,
-        theta_path = theta_path,
-        converged = FALSE,
-        failed_at = r,
-        error = fit
-      ))
-    }
-    
-    current_Tht <- fit$Tht
-    theta_path[[r]] <- current_Tht
-  }
+    )}
+  )
   
+  theta_path <- lapply(seq_len(nrho), \(r) fit[[r]]$Tht)
+  current_Tht <- theta_path[[nrho]]
+  
+  # for (r in seq_len(nrho)) {
+  #   if (verbose) {
+  #     cat("\nRho iteration:", r, "of", nrho, "\n")
+  #   }
+  #   
+  #   fit <- try(
+  #     admm_tht_sub(
+  #       p = p,
+  #       N = K_hat,
+  #       fk = rep(1 / K_hat, K_hat),
+  #       S = S,
+  #       wTht = wTht,
+  #       pendiag = pendiag,
+  #       rho = grid_rho[r],
+  #       alpha = alpha,
+  #       maxit = maxit,
+  #       thr = thr,
+  #       Tht = current_Tht,
+  #       trace = trace
+  #     ),
+  #     silent = TRUE
+  #   )
+  #   
+  #   if (inherits(fit, "try-error")) {
+  #     return(list(
+  #       ok = FALSE,
+  #       grid_rho = grid_rho,
+  #       theta_path = theta_path,
+  #       converged = FALSE,
+  #       failed_at = r,
+  #       error = fit
+  #     ))
+  #   }
+  #   theta_path[[r]] <- fit$Tht
+  #   current_Tht <- fit$Tht
+  # }
+  # 
   return(list(
     ok = TRUE,
     grid_rho = grid_rho,
@@ -1081,7 +1100,6 @@ parse_sim_config <- function(config_row) {
   )
 }
 
-
 # ---------------------------
 # 4. Helper: initialize storage objects
 # ---------------------------
@@ -1166,7 +1184,6 @@ initialize_simulation_storage <- function(d, n, p, K_true, n_sim, n_rho) {
   )
 }
 
-
 # ---------------------------
 # 5. Helper: create basis objects
 # ---------------------------
@@ -1183,7 +1200,6 @@ create_basis_objects <- function(tp, K_true) {
     Phi = Phi
   )
 }
-
 
 # ---------------------------
 # 6. Helper: generate true precision/covariance layers
@@ -1260,7 +1276,6 @@ list2array <- function(x) {
   stop("'x' must be a list of matrices or vectors.", call. = FALSE)
 }
 
-
 array2list <- function(x) {
   # Convert a 2D/3D array into a list.
   #
@@ -1297,7 +1312,6 @@ array2list <- function(x) {
   
   return(out)
 }
-
 
 # ---------------------------
 # 2. Shared support modification across layers
@@ -1353,7 +1367,6 @@ apply_shared_support <- function(Tht, perc_theta_share) {
   return(Tht)
 }
 
-
 # ---------------------------
 # 3. Star-shaped precision matrix generator
 # ---------------------------
@@ -1404,7 +1417,6 @@ rStars <- function(d, nstars = 1L, tht.min = 0.4, tht.max = 0.5) {
   return(do.call(pracma::blkdiag, blocks))
 }
 
-
 # ---------------------------
 # 4. Band precision matrix generator
 # ---------------------------
@@ -1454,7 +1466,6 @@ rTht <- function(p, id.diag, det.min = 0.5) {
   
   return(Tht)
 }
-
 
 rPar <- function(p, K, id.diag, s1 = 3, s2 = -1.8, perc.theta.share = 1.0) {
   # Generate layer-specific banded precision and covariance matrices.
@@ -1507,10 +1518,57 @@ rPar <- function(p, K, id.diag, s1 = 3, s2 = -1.8, perc.theta.share = 1.0) {
   return(list(Tht = Tht, Sgm = Sgm))
 }
 
-
 # ---------------------------
 # 5. Random graph generator via BDgraph
 # ---------------------------
+
+simulThetaBDgraph <- function (p = 10, graph = c("random", "cluster", "smallworld", "scale-free", 
+                                                 "lattice", "hub", "star"), 
+                               prob = 0.2, size = NULL, class = NULL, b = 3, K = NULL, 
+                               sigma = NULL, vis = FALSE, rewire = 0.05) {
+  #   p:	number of variables (nodes).
+  #   graph:	graph structure with options "random", "cluster", "smallworld", "scale-free", "lattice", "hub", "star"
+  #   prob: if graph = "random", it is the probability that a pair of nodes has a link.
+  #   size: number of links in the true graph (graph size).
+  #   class	if graph = "cluster", it is the number of classes.
+  #   b: degree of freedom for G-Wishart distribution, W_G(b, D). The default D is an identity matrix.
+  #   vis: visualize the true graph structure.
+  #   rewire: rewiring probability for smallworld network. Must be between 0 and 1.
+  if (p < 2) stop("'p' must be greater than 1")
+  if ((prob < 0) | (prob > 1)) stop("'prob' must be between ( 0, 1 )")
+  if (b <= 2) stop("'b' must be greater than 2")
+  if ((rewire < 0) | (rewire > 1)) stop("'rewire' must be between ( 0, 1 )")
+  if (inherits(graph, "graph")) graph <- unclass(graph)
+  if (is.matrix(graph) & is.matrix(K)) 
+    if (nrow(graph) != nrow(K)) 
+      stop("'graph' and 'K' have non-conforming size")
+  if (!is.null(size)) 
+    if ((sum(size) < 0) | (sum(size) > (p * (p - 1)/2))) 
+      stop("'size' must be between ( 0, p*(p-1)/2 )")
+  if (is.matrix(K)) {
+    if (!isSymmetric(K)) 
+      stop("'K' must be a positive definite matrix")
+    graph <- "fixed"
+    p <- nrow(K)
+  }
+  G <- BDgraph::graph.sim(p = p, graph = graph, prob = prob, 
+                          size = size, class = class, rewire = rewire)
+  df <- .5 * sum(G)
+  Ti <- chol(solve(diag(p)))
+  diag(G) <- 0
+  K <- matrix(0, p, p)
+  threshold <- 1e-08
+  result <- .C("rgwish_c", as.integer(G), as.double(Ti), 
+               K = as.double(K), as.integer(b), as.integer(p), 
+               as.double(threshold), PACKAGE = "BDgraph")
+  K <- matrix(result$K, p, p)
+  sigma <- stats::cov2cor(solve(K))
+  K <- solve(sigma)
+  simulation <- list(G = G, df = df, graph = graph, sigma = sigma, K = K)
+  BDgraph::plot.graph(G, main = "Graph structure")
+  class(simulation) <- "sim"
+  return(simulation)
+}
 
 simulTheta <- function(n,
                        p,
@@ -1556,14 +1614,17 @@ simulTheta <- function(n,
     stop("'alpha' must be a positive scalar.", call. = FALSE)
   }
   
-  out <- BDgraph::bdgraph.sim(
-    p = as.integer(p),
-    n = as.integer(n),
-    prob = prob * alpha,
-    vis = vis,
-    graph = graph,
-    ...
-  )
+  out <- simulThetaBDgraph(p = as.integer(p), graph = graph, prob = prob * alpha, 
+                           size = ceiling(prob * alpha * (p * (p-1) / 2)), vis = vis, ...)
+  
+  # out <- BDgraph::bdgraph.sim(
+  #   p = as.integer(p),
+  #   n = as.integer(n),
+  #   prob = prob * alpha,
+  #   vis = vis,
+  #   graph = graph,
+  #   ...
+  # )
   
   return(out)
 }
@@ -1654,6 +1715,11 @@ generate_true_model <- function(p,
   }
   
   if (graph_type == "smallworld") {
+    if (!is.null(seed_base)) {
+      if(length(seed_base) == 1) 
+        seed_base <- rep(seed_base, K_true)
+    }
+      
     out_list <- lapply(seq_len(K_true), function(k) {
       theta_k <- round(
         simulTheta(
@@ -1664,7 +1730,7 @@ generate_true_model <- function(p,
           vis = FALSE,
           graph = "smallworld",
           rewire = 0.5,
-          seed = if (is.null(seed_base)) NULL else seed_base + k
+          seed = if (is.null(seed_base)) NULL else seed_base[k]
         )$K,
         5
       )
@@ -1697,7 +1763,7 @@ create_full_matrix <- function(out_rPar, alpha = 0.5) {
   for(k in 1:K_true){
     Tht_full[1:p + (k-1)*p, 1:p + (k-1)*p] <- Tht_blocks[,,k]
     if(k > 1) {
-      Tht_full[1:p + (k-2)*p, 1:p + (k-1)*p] <- 0.005 * ((Tht_blocks[,,k-1] - diag(diag(Tht_blocks[,,k-1]))) + 
+      Tht_full[1:p + (k-2)*p, 1:p + (k-1)*p] <- alpha * ((Tht_blocks[,,k-1] - diag(diag(Tht_blocks[,,k-1]))) + 
                                                          (Tht_blocks[,,k] - diag(diag(Tht_blocks[,,k]))))
       Tht_full[1:p + (k-1)*p, 1:p + (k-2)*p] <- t(Tht_full[1:p + (k-2)*p, 1:p + (k-1)*p])
     }

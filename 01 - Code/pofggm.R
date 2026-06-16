@@ -701,13 +701,18 @@ fit_pofggm_path <- function(X,
     
     rho_max <- fit_list[[1]]$rho.max
     grid_rho <- rho_max * perc_rho
-    alpha_vec <- fit_list[[1]]$alpha_opt
+    # alpha_vec <- fit_list[[1]]$alpha_opt
+    wTht <- fit_list[[1]]$wTht
     
     if (n_rho >= 2L) {
       for (r in 2:n_rho) {
         if (verbose) {
           cat("\nRho iteration:", r, "of", n_rho, "\n")
         }
+        # currSgm <- fit_list[[r - 1]]$Sgm.hat
+        # currTht <- fit_list[[r - 1]]$Tht.hat
+        
+        if(r > 2) alpha_vec <- fit_list[[r - 1]]$alpha_opt
         
         fit_list[[r]] <- pofggm(
           id_pobs = id_pobs,
@@ -715,9 +720,9 @@ fit_pofggm_path <- function(X,
           X = X,
           Phi = Phi_emp,
           tp = tp,
-          Sgm.hat = fit_list[[r - 1]]$Sgm.hat,
-          Tht.hat = fit_list[[r - 1]]$Tht.hat,
-          wTht = NULL,
+          Sgm.hat = NULL,#currSgm,
+          Tht.hat = NULL,#currTht,
+          wTht = wTht,
           maxit.admm = maxit_admm,
           rho = grid_rho[r],
           gamma = gamma,
